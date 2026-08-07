@@ -4,7 +4,8 @@ import {
   CategoryScore, 
   ScoreLabel,
   Platform,
-  ContentGoal
+  ContentGoal,
+  UploadedFile
 } from '@/types';
 
 /**
@@ -14,8 +15,123 @@ import {
  * consistent criteria. The same input will always produce the same
  * analysis results when evaluated under the same criteria.
  * 
- * NOTE: This is currently using demonstration data. To connect a real
- * AI provider, replace the analyzeContent function with actual AI calls.
+ * AI Integration Architecture:
+ * 
+ * 1. Text Content (topic, hook, caption, script, transcript):
+ *    - Sends text directly to text-capable AI model (e.g., GPT-4, Claude)
+ *    - Used for: Topic Analysis, Hook Strength, Caption Optimization
+ * 
+ * 2. Image Content:
+ *    - Sends to vision-capable AI model (e.g., GPT-4 Vision, Claude Vision)
+ *    - Analyzes: Visual composition, color usage, text overlay, emotional impact
+ *    - Provides: Visual recommendations, engagement potential
+ * 
+ * 3. Video Content:
+ *    - Step 1: Extract audio and transcribe (Whisper API or similar)
+ *    - Step 2: Extract key frames for visual analysis
+ *    - Step 3: Send transcription + frame analysis to text/vision AI
+ *    - Analyzes: Pacing, visual hooks, retention patterns, CTA placement
+ * 
+ * 4. Video Link:
+ *    - Fetches video metadata and thumbnail
+ *    - Sends URL to AI for context analysis (where supported)
+ *    - Falls back to metadata-based scoring
+ * 
+ * NOTE: This is currently using demonstration logic. Replace the 
+ * analyzeContent function with actual AI calls when connecting to a provider.
+ * All AI credentials must be kept server-side.
+ */
+
+// AI Analysis Preparation Interface
+export interface AIAnalysisRequest {
+  contentType: 'text' | 'image' | 'video' | 'video-link';
+  textContent?: string;
+  fileData?: {
+    name: string;
+    mimeType: string;
+    size: number;
+    dataUrl?: string; // Base64 for images
+    requiresProcessing: boolean;
+  };
+  metadata: {
+    platform: Platform;
+    goal: ContentGoal;
+    tone: string;
+    targetAudience: string;
+  };
+}
+
+// Prepare content for AI analysis
+export function prepareForAIAnalysis(input: AnalysisInput): AIAnalysisRequest {
+  const { content, contentType, targetPlatform, goal, tone, targetAudience, uploadedFile, videoLink } = input;
+  
+  let analysisType: 'text' | 'image' | 'video' | 'video-link';
+  let textContent: string | undefined;
+  let fileData: AIAnalysisRequest['fileData'] | undefined;
+  
+  switch (contentType) {
+    case 'image':
+      analysisType = 'image';
+      textContent = content || ''; // Optional description
+      fileData = uploadedFile ? {
+        name: uploadedFile.name,
+        mimeType: uploadedFile.mimeType,
+        size: uploadedFile.size,
+        dataUrl: uploadedFile.dataUrl,
+        requiresProcessing: false // Base64 image can be sent directly
+      } : undefined;
+      break;
+      
+    case 'video':
+      analysisType = 'video';
+      textContent = content || '';
+      fileData = uploadedFile ? {
+        name: uploadedFile.name,
+        mimeType: uploadedFile.mimeType,
+        size: uploadedFile.size,
+        dataUrl: uploadedFile.dataUrl,
+        requiresProcessing: true // Video requires transcription + frame extraction
+      } : undefined;
+      break;
+      
+    case 'video-link':
+      analysisType = 'video-link';
+      textContent = videoLink || '';
+      fileData = undefined;
+      break;
+      
+    default:
+      analysisType = 'text';
+      textContent = content;
+      fileData = undefined;
+  }
+  
+  return {
+    contentType: analysisType,
+    textContent,
+    fileData,
+    metadata: {
+      platform: targetPlatform,
+      goal,
+      tone: tone || 'casual',
+      targetAudience: targetAudience || ''
+    }
+  };
+}
+
+// Server-side API call would look like this (example):
+/**
+ * async function callAIAnalysis(request: AIAnalysisRequest): Promise<AIResult> {
+ *   const response = await fetch('/api/analyze', {
+ *     method: 'POST',
+ *     headers: {
+ *       'Content-Type': 'application/json',
+ *       // API key handled server-side
+ *     },
+ *     body: JSON.stringify(request)
+ *   });
+ *   return response.json();
+ * }
  */
 
 // Score calculation weights for each category

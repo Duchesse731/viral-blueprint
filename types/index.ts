@@ -114,7 +114,38 @@ export interface AnalysisInput {
   goal: ContentGoal;
   tone: ContentTone;
   targetAudience: string;
+  // File upload support
+  uploadedFile?: UploadedFile;
+  videoLink?: string;
 }
+
+// Uploaded file interface
+export interface UploadedFile {
+  id: string;
+  name: string;
+  type: 'image' | 'video' | 'document';
+  mimeType: string;
+  size: number; // in bytes
+  dataUrl?: string; // Base64 for preview
+  lastModified: number;
+  expiresAt: Date;
+}
+
+// Allowed file types
+export const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+export const ALLOWED_VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'];
+export const ALLOWED_DOCUMENT_TYPES = [
+  'text/plain', // .txt
+  'application/pdf', // .pdf
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/x-subrip', // .srt
+  'text/vtt' // .vtt
+];
+
+// File size limits (in bytes)
+export const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
+export const MAX_VIDEO_SIZE = 100 * 1024 * 1024; // 100MB
+export const MAX_DOCUMENT_SIZE = 5 * 1024 * 1024; // 5MB
 
 // Navigation items
 export interface NavItem {

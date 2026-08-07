@@ -1,9 +1,17 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { CreatorProfile, Project, FreePlan, Platform, ContentGoal, ContentTone, AnalysisInput, AnalysisResult, ContentType, Toast as ToastType, ScoreLabel } from '@/types';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { CreatorProfile, Project, FreePlan, Platform, ContentGoal, ContentTone, AnalysisInput, AnalysisResult, ContentType, Toast as ToastType, ScoreLabel, UploadedFile } from '@/types';
 import { getProfile, saveProfile, isOnboarded, getProjects, createProject, updateProject, deleteProject, duplicateProject, getProject, saveAnalysisResult, getRemainingAnalyses, useAnalysis, exportReport } from '@/services/storeService';
 import { analyzeContent, getScoreLabel, getScoreLabelText } from '@/services/analysisService';
+import { 
+  processUpload, 
+  validateVideoUrl, 
+  formatFileSize, 
+  formatExpirationDate,
+  getAllowedTypesForContentType,
+  getMaxFileSize
+} from '@/services/fileUploadService';
 import { 
   Home, Plus, FolderOpen, FileText, User, Sparkles, 
   ChevronRight, ArrowLeft, Copy, Download, Trash2,
@@ -201,7 +209,10 @@ export default function App() {
   // Perform analysis
   const performAnalysis = useCallback(async () => {
     const input = state.analysisInput as AnalysisInput;
-    if (!input.content || !input.targetPlatform || !input.goal) {
+    
+    // Validate required fields
+    const hasContent = input.content?.trim() || input.uploadedFile || input.videoLink?.trim();
+    if (!hasContent || !input.targetPlatform || !input.goal) {
       showToast('Please fill in all required fields', 'error');
       navigate('new-analysis');
       return;
@@ -219,10 +230,21 @@ export default function App() {
       // Use one analysis from the free plan (only decrements once per submission)
       useAnalysis();
       
+      // Generate title based on content type
+      let title = input.content?.substring(0, 50) || '';
+      if (input.uploadedFile) {
+        title = input.uploadedFile.name.substring(0, 47) + '...';
+      } else if (input.videoLink) {
+        title = 'Video Link Analysis';
+      }
+      if (!title) {
+        title = 'Untitled Content';
+      }
+      
       // Create project
       const project = createProject({
-        title: input.content.substring(0, 50) + (input.content.length > 50 ? '...' : ''),
-        content: input.content,
+        title,
+        content: input.content || '',
         contentType: input.contentType || 'topic',
         targetPlatform: input.targetPlatform,
         goal: input.goal,
@@ -230,7 +252,7 @@ export default function App() {
         targetAudience: input.targetAudience || state.profile?.targetAudience || ''
       });
 
-      // Perform analysis
+      // Perform analysis (passes full input including uploadedFile and videoLink)
       const result = await analyzeContent(input);
       
       // Save analysis result
@@ -1613,6 +1635,462 @@ function ProjectCard({ project, onClick }: { project: Project; onClick: () => vo
   );
 }
 
+// File Upload Component
+function FileUpload({
+  contentType,
+  file,
+  onFileSelect,
+  onFileRemove,
+  error
+}: {
+  contentType: ContentType;
+  file: UploadedFile | null;
+  onFileSelect: (file: UploadedFile) => void;
+  onFileRemove: () => void;
+  error?: string;
+}) {
+  const [isDragging, setIsDragging] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  
+  const allowedTypes = getAllowedTypesForContentType(contentType);
+  const maxSize = getMaxFileSize(contentType);
+  const maxSizeFormatted = formatFileSize(maxSize);
+  
+  const getAcceptedTypes = () => {
+    switch (contentType) {
+      case 'image':
+        return '.jpg,.jpeg,.png,.webp';
+      case 'video':
+        return '.mp4,.mov,.webm';
+      case 'script':
+        return '.txt,.pdf,.docx';
+      case 'transcript':
+        return '.txt,.pdf,.docx,.srt,.vtt';
+      default:
+        return '';
+    }
+  };
+  
+  const getPlaceholderText = () => {
+    switch (contentType) {
+      case 'image':
+        return 'Drag & drop an image here, or click to select\n\nSupports: JPG, JPEG, PNG, WebP';
+      case 'video':
+        return 'Drag & drop a video here, or click to select\n\nSupports: MP4, MOV, WebM';
+      case 'script':
+        return 'Upload a script file or paste text below\n\nSupports: TXT, PDF, DOCX';
+      case 'transcript':
+        return 'Upload a transcript file or paste text below\n\nSupports: TXT, PDF, DOCX, SRT, VTT';
+      default:
+        return '';
+    }
+  };
+  
+  const handleFile = async (selectedFile: File) => {
+    setLocalError(null);
+    
+    try {
+      const processedFile = await processUpload(selectedFile, contentType);
+      onFileSelect(processedFile);
+    } catch (err) {
+      setLocalError((err as Error).message);
+    }
+  };
+  
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    const droppedFile = e.dataTransfer.files[0];
+    if (droppedFile) {
+      handleFile(droppedFile);
+    }
+  }, [contentType]);
+  
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+  
+  const handleDragLeave = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+  
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      handleFile(selectedFile);
+    }
+  };
+  
+  const handleClick = () => {
+    inputRef.current?.click();
+  };
+  
+  const handleReplace = () => {
+    onFileRemove();
+    setTimeout(() => inputRef.current?.click(), 0);
+  };
+  
+  const displayError = error || localError;
+  
+  // Show file preview when file is uploaded
+  if (file) {
+    return (
+      <div className="file-preview-container">
+        <div className="file-preview-card">
+          {file.type === 'image' && file.dataUrl && (
+            <div className="file-image-preview">
+              <img src={file.dataUrl} alt={file.name} />
+            </div>
+          )}
+          
+          {file.type === 'video' && (
+            <div className="file-video-preview">
+              <Video size={48} />
+              <video controls={false} style={{ display: 'none' }}>
+                <source src={file.dataUrl} type={file.mimeType} />
+              </video>
+            </div>
+          )}
+          
+          {file.type === 'document' && (
+            <div className="file-document-preview">
+              <FileText size={48} />
+            </div>
+          )}
+          
+          <div className="file-info">
+            <div className="file-name">{file.name}</div>
+            <div className="file-meta">
+              <span className="file-size">{formatFileSize(file.size)}</span>
+              <span className="file-expiry">
+                <Clock size={14} />
+                Expires: {formatExpirationDate(file.expiresAt)}
+              </span>
+            </div>
+          </div>
+          
+          <div className="file-actions">
+            <button className="btn btn-ghost btn-sm" onClick={handleReplace}>
+              <RefreshCw size={16} />
+              Replace
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={onFileRemove}>
+              <Trash2 size={16} />
+              Remove
+            </button>
+          </div>
+        </div>
+        
+        <input
+          ref={inputRef}
+          type="file"
+          accept={getAcceptedTypes()}
+          onChange={handleInputChange}
+          style={{ display: 'none' }}
+        />
+      </div>
+    );
+  }
+  
+  return (
+    <div className="file-upload-container">
+      <div
+        className={`file-upload-area ${isDragging ? 'dragging' : ''} ${displayError ? 'error' : ''}`}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onClick={handleClick}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept={getAcceptedTypes()}
+          onChange={handleInputChange}
+          style={{ display: 'none' }}
+        />
+        
+        <div className="upload-icon">
+          {contentType === 'image' ? <Camera size={48} /> : 
+           contentType === 'video' ? <Video size={48} /> : 
+           <Upload size={48} />}
+        </div>
+        
+        <div className="upload-text">
+          {getPlaceholderText().split('\n').map((line, i) => (
+            <p key={i}>{line}</p>
+          ))}
+        </div>
+        
+        <p className="upload-hint">Max file size: {maxSizeFormatted}</p>
+      </div>
+      
+      {displayError && (
+        <div className="file-upload-error">
+          <AlertTriangle size={16} />
+          {displayError}
+        </div>
+      )}
+      
+      <style jsx>{`
+        .file-upload-container {
+          width: 100%;
+        }
+        
+        .file-upload-area {
+          border: 2px dashed var(--color-gray-600);
+          border-radius: var(--radius-lg);
+          padding: var(--spacing-xl);
+          text-align: center;
+          cursor: pointer;
+          transition: all var(--transition-fast);
+          background: var(--color-gray-800);
+        }
+        
+        .file-upload-area:hover {
+          border-color: var(--color-electric-purple);
+          background: rgba(139, 92, 246, 0.05);
+        }
+        
+        .file-upload-area.dragging {
+          border-color: var(--color-electric-purple);
+          background: rgba(139, 92, 246, 0.1);
+          transform: scale(1.01);
+        }
+        
+        .file-upload-area.error {
+          border-color: var(--color-error);
+        }
+        
+        .upload-icon {
+          color: var(--color-gray-500);
+          margin-bottom: var(--spacing-md);
+        }
+        
+        .file-upload-area:hover .upload-icon,
+        .file-upload-area.dragging .upload-icon {
+          color: var(--color-electric-purple);
+        }
+        
+        .upload-text {
+          color: var(--color-gray-300);
+          margin-bottom: var(--spacing-sm);
+        }
+        
+        .upload-text p {
+          margin: 0;
+          white-space: pre-line;
+        }
+        
+        .upload-hint {
+          color: var(--color-gray-500);
+          font-size: var(--font-size-sm);
+          margin: 0;
+        }
+        
+        .file-upload-error {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-sm) var(--spacing-md);
+          background: rgba(239, 68, 68, 0.1);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          border-radius: var(--radius-md);
+          margin-top: var(--spacing-sm);
+          color: var(--color-error);
+          font-size: var(--font-size-sm);
+        }
+        
+        .file-preview-container {
+          width: 100%;
+        }
+        
+        .file-preview-card {
+          background: var(--color-gray-800);
+          border: 2px solid var(--color-electric-purple);
+          border-radius: var(--radius-lg);
+          padding: var(--spacing-lg);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: var(--spacing-md);
+        }
+        
+        .file-image-preview {
+          width: 100%;
+          max-height: 200px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          overflow: hidden;
+          border-radius: var(--radius-md);
+          background: var(--color-gray-900);
+        }
+        
+        .file-image-preview img {
+          max-width: 100%;
+          max-height: 200px;
+          object-fit: contain;
+        }
+        
+        .file-video-preview {
+          width: 100%;
+          padding: var(--spacing-xl);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: var(--color-gray-900);
+          border-radius: var(--radius-md);
+          color: var(--color-gray-500);
+        }
+        
+        .file-document-preview {
+          width: 100%;
+          padding: var(--spacing-xl);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: var(--color-gray-900);
+          border-radius: var(--radius-md);
+          color: var(--color-gray-500);
+        }
+        
+        .file-info {
+          text-align: center;
+          width: 100%;
+        }
+        
+        .file-name {
+          font-weight: 600;
+          color: var(--color-white);
+          word-break: break-all;
+          margin-bottom: var(--spacing-xs);
+        }
+        
+        .file-meta {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: center;
+          gap: var(--spacing-md);
+          color: var(--color-gray-400);
+          font-size: var(--font-size-sm);
+        }
+        
+        .file-expiry {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-xs);
+        }
+        
+        .file-actions {
+          display: flex;
+          gap: var(--spacing-sm);
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// Video Link Input Component
+function VideoLinkInput({
+  value,
+  onChange,
+  error
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  error?: string;
+}) {
+  const [localError, setLocalError] = useState<string | null>(null);
+  
+  const handleBlur = () => {
+    if (value.trim()) {
+      const validation = validateVideoUrl(value);
+      if (!validation.valid) {
+        setLocalError(validation.error || 'Invalid URL');
+      } else {
+        setLocalError(null);
+      }
+    }
+  };
+  
+  const displayError = error || localError;
+  
+  return (
+    <div className="video-link-input">
+      <div className="input-wrapper">
+        <Link size={20} className="input-icon" />
+        <input
+          type="url"
+          className={`form-input with-icon ${displayError ? 'error' : ''}`}
+          placeholder="https://www.youtube.com/watch?v=..."
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={handleBlur}
+        />
+      </div>
+      
+      {displayError && (
+        <div className="link-error">
+          <AlertTriangle size={16} />
+          {displayError}
+        </div>
+      )}
+      
+      <p className="link-hint">
+        Supported: YouTube, TikTok, Instagram, Facebook, Vimeo, Dailymotion
+      </p>
+      
+      <style jsx>{`
+        .video-link-input {
+          width: 100%;
+        }
+        
+        .input-wrapper {
+          position: relative;
+        }
+        
+        .input-icon {
+          position: absolute;
+          left: var(--spacing-md);
+          top: 50%;
+          transform: translateY(-50%);
+          color: var(--color-gray-500);
+        }
+        
+        .form-input.with-icon {
+          padding-left: calc(var(--spacing-md) + 28px);
+        }
+        
+        .form-input.with-icon.error {
+          border-color: var(--color-error);
+        }
+        
+        .link-error {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-sm) var(--spacing-md);
+          background: rgba(239, 68, 68, 0.1);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          border-radius: var(--radius-md);
+          margin-top: var(--spacing-sm);
+          color: var(--color-error);
+          font-size: var(--font-size-sm);
+        }
+        
+        .link-hint {
+          color: var(--color-gray-500);
+          font-size: var(--font-size-sm);
+          margin-top: var(--spacing-sm);
+        }
+      `}</style>
+    </div>
+  );
+}
+
 // New Analysis Screen
 function NewAnalysisScreen({ 
   profile, 
@@ -1625,6 +2103,8 @@ function NewAnalysisScreen({
 }) {
   const [contentType, setContentType] = useState<ContentType>('topic');
   const [content, setContent] = useState('');
+  const [uploadedFile, setUploadedFile] = useState<UploadedFile | null>(null);
+  const [videoLink, setVideoLink] = useState('');
   const [targetPlatform, setTargetPlatform] = useState<Platform>(profile?.preferredPlatforms[0] || 'tiktok');
   const [goal, setGoal] = useState<ContentGoal>(profile?.mainGoal || 'views');
   const [tone, setTone] = useState<ContentTone>(profile?.preferredTone || 'casual');
@@ -1636,12 +2116,42 @@ function NewAnalysisScreen({
   const goals: ContentGoal[] = ['views', 'engagement', 'followers', 'leads', 'sales'];
   const tones: ContentTone[] = ['professional', 'casual', 'humorous', 'inspirational', 'educational', 'entertaining', 'dramatic'];
 
+  // Determine if we need content input
+  const needsTextInput = ['topic', 'hook', 'caption', 'script', 'transcript'].includes(contentType);
+  const needsFileUpload = ['script', 'transcript', 'image', 'video'].includes(contentType);
+  const needsVideoLink = contentType === 'video-link';
+
+  // Reset file and link when content type changes
+  const handleContentTypeChange = (type: ContentType) => {
+    setContentType(type);
+    setUploadedFile(null);
+    setVideoLink('');
+    setErrors({});
+  };
+
   const handleSubmit = () => {
     const newErrors: Record<string, string> = {};
     
-    if (!content.trim()) {
+    // Validate based on content type
+    if (needsTextInput && !content.trim()) {
       newErrors.content = 'Please enter your content';
     }
+    
+    if (needsFileUpload && !uploadedFile && !content.trim()) {
+      newErrors.content = 'Please upload a file or enter content';
+    }
+    
+    if (needsVideoLink && !videoLink.trim()) {
+      newErrors.videoLink = 'Please enter a video URL';
+    }
+    
+    if (needsVideoLink && videoLink.trim()) {
+      const linkValidation = validateVideoUrl(videoLink);
+      if (!linkValidation.valid) {
+        newErrors.videoLink = linkValidation.error || 'Invalid video URL';
+      }
+    }
+    
     if (!targetPlatform) {
       newErrors.platform = 'Please select a platform';
     }
@@ -1658,10 +2168,15 @@ function NewAnalysisScreen({
         targetPlatform,
         goal,
         tone,
-        targetAudience
+        targetAudience,
+        uploadedFile: uploadedFile || undefined,
+        videoLink: needsVideoLink ? videoLink : undefined
       });
     }
   };
+
+  // Calculate expiration date for 7-day policy
+  const expirationDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   return (
     <div className="new-analysis-screen">
@@ -1679,7 +2194,7 @@ function NewAnalysisScreen({
             <button
               key={type}
               className={`content-type-card ${contentType === type ? 'selected' : ''}`}
-              onClick={() => setContentType(type)}
+              onClick={() => handleContentTypeChange(type)}
             >
               {type === 'topic' && <Hash size={24} />}
               {type === 'hook' && <MessageSquare size={24} />}
@@ -1697,23 +2212,85 @@ function NewAnalysisScreen({
 
       <div className="form-section">
         <h3>Your Content</h3>
-        <textarea
-          className="form-textarea content-input"
-          placeholder={
-            contentType === 'topic' ? 'Enter your topic or idea...' :
-            contentType === 'hook' ? 'Enter your hook or title...' :
-            contentType === 'caption' ? 'Enter your caption...' :
-            contentType === 'script' ? 'Paste your script here...' :
-            contentType === 'transcript' ? 'Paste your transcript here...' :
-            contentType === 'image' ? 'Describe your image...' :
-            contentType === 'video' ? 'Describe your video or paste video data...' :
-            'Paste your video link...'
-          }
-          value={content}
-          onChange={e => setContent(e.target.value)}
-          rows={8}
-        />
-        {errors.content && <div className="form-error">{errors.content}</div>}
+        
+        {/* Text input for text-based content types */}
+        {needsTextInput && (
+          <div className="content-input-section">
+            <textarea
+              className="form-textarea content-input"
+              placeholder={
+                contentType === 'topic' ? 'Enter your topic or idea...' :
+                contentType === 'hook' ? 'Enter your hook or title...' :
+                contentType === 'caption' ? 'Enter your caption...' :
+                contentType === 'script' ? 'Paste your script here...' :
+                'Paste your transcript here...'
+              }
+              value={content}
+              onChange={e => setContent(e.target.value)}
+              rows={8}
+            />
+            {errors.content && <div className="form-error">{errors.content}</div>}
+          </div>
+        )}
+        
+        {/* File upload for script/transcript */}
+        {(contentType === 'script' || contentType === 'transcript') && (
+          <div className="file-upload-section">
+            <p className="section-label">Or upload a file:</p>
+            <FileUpload
+              contentType={contentType}
+              file={uploadedFile}
+              onFileSelect={setUploadedFile}
+              onFileRemove={() => setUploadedFile(null)}
+              error={errors.content}
+            />
+          </div>
+        )}
+        
+        {/* File upload for image */}
+        {contentType === 'image' && (
+          <div className="file-upload-section">
+            <FileUpload
+              contentType={contentType}
+              file={uploadedFile}
+              onFileSelect={setUploadedFile}
+              onFileRemove={() => setUploadedFile(null)}
+              error={errors.content}
+            />
+            <p className="upload-note">
+              <Info size={16} />
+              Upload accepted — live media analysis requires the AI service connection.
+            </p>
+          </div>
+        )}
+        
+        {/* File upload for video */}
+        {contentType === 'video' && (
+          <div className="file-upload-section">
+            <FileUpload
+              contentType={contentType}
+              file={uploadedFile}
+              onFileSelect={setUploadedFile}
+              onFileRemove={() => setUploadedFile(null)}
+              error={errors.content}
+            />
+            <p className="upload-note">
+              <Info size={16} />
+              Upload accepted — live media analysis requires the AI service connection.
+            </p>
+          </div>
+        )}
+        
+        {/* Video link input */}
+        {needsVideoLink && (
+          <div className="video-link-section">
+            <VideoLinkInput
+              value={videoLink}
+              onChange={setVideoLink}
+              error={errors.videoLink}
+            />
+          </div>
+        )}
       </div>
 
       <div className="form-section">
@@ -1791,6 +2368,14 @@ function NewAnalysisScreen({
         <p className="text-sm text-muted mt-sm">
           {profile?.targetAudience ? `Default: ${profile.targetAudience}` : 'Enter your target audience'}
         </p>
+      </div>
+
+      <div className="seven-day-notice">
+        <Clock size={18} />
+        <div>
+          <strong>7-Day Asset Retention</strong>
+          <p>Uploaded files and generated content will be automatically deleted after 7 days (expires: {formatExpirationDate(expirationDate)}). Please download your results before expiration.</p>
+        </div>
       </div>
 
       <button className="btn btn-primary btn-lg full-width" onClick={handleSubmit}>
@@ -1923,6 +2508,67 @@ function NewAnalysisScreen({
 
         .full-width {
           width: 100%;
+        }
+
+        .file-upload-section {
+          margin-top: var(--spacing-md);
+        }
+
+        .section-label {
+          color: var(--color-gray-400);
+          font-size: var(--font-size-sm);
+          margin-bottom: var(--spacing-sm);
+        }
+
+        .upload-note {
+          display: flex;
+          align-items: flex-start;
+          gap: var(--spacing-sm);
+          margin-top: var(--spacing-md);
+          padding: var(--spacing-sm) var(--spacing-md);
+          background: rgba(59, 130, 246, 0.1);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: var(--radius-md);
+          color: var(--color-bright-cyan);
+          font-size: var(--font-size-sm);
+        }
+
+        .upload-note svg {
+          flex-shrink: 0;
+          margin-top: 2px;
+        }
+
+        .video-link-section {
+          margin-top: var(--spacing-sm);
+        }
+
+        .seven-day-notice {
+          display: flex;
+          align-items: flex-start;
+          gap: var(--spacing-md);
+          padding: var(--spacing-md);
+          background: rgba(139, 92, 246, 0.1);
+          border: 1px solid rgba(139, 92, 246, 0.3);
+          border-radius: var(--radius-lg);
+          margin-bottom: var(--spacing-lg);
+        }
+
+        .seven-day-notice svg {
+          flex-shrink: 0;
+          color: var(--color-electric-purple);
+          margin-top: 2px;
+        }
+
+        .seven-day-notice strong {
+          display: block;
+          color: var(--color-white);
+          margin-bottom: var(--spacing-xs);
+        }
+
+        .seven-day-notice p {
+          margin: 0;
+          color: var(--color-gray-400);
+          font-size: var(--font-size-sm);
         }
 
         @media (max-width: 768px) {
