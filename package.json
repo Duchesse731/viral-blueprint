@@ -1,0 +1,25 @@
+{
+  "name": "viral-blueprint",
+  "version": "1.0.0",
+  "description": "Viral Blueprint - Content Analysis Platform for Content Creators",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "keywords": ["content", "analysis", "creator", "viral", "social-media"],
+  "author": "Zenori",
+  "license": "MIT",
+  "dependencies": {
+    "lucide-react": "^1.30.0",
+    "next": "^16.3.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.2.18",
+    "typescript": "^7.0.2"
+  }
+}
