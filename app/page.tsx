@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { CreatorProfile, Project, FreePlan, Platform, ContentGoal, ContentTone, AnalysisInput, AnalysisResult, ContentType, Toast as ToastType, ScoreLabel } from '@/types';
-import { getProfile, saveProfile, isOnboarded, getProjects, createProject, updateProject, deleteProject, duplicateProject, getProject, saveAnalysisResult, getRemainingAnalyses, exportReport } from '@/services/storeService';
+import { getProfile, saveProfile, isOnboarded, getProjects, createProject, updateProject, deleteProject, duplicateProject, getProject, saveAnalysisResult, getRemainingAnalyses, useAnalysis, exportReport } from '@/services/storeService';
 import { analyzeContent, getScoreLabel, getScoreLabelText } from '@/services/analysisService';
 import { 
   Home, Plus, FolderOpen, FileText, User, Sparkles, 
@@ -11,7 +11,7 @@ import {
   Target, Eye, Users, ShoppingCart, MessageCircle,
   Play, Edit3, RefreshCw, Save, Settings, LogOut,
   Upload, Link, FileCode, Camera, Video, Hash,
-  Share2, Star, Award,
+  Share2, Star, Award, Info,
   ThumbsUp, MessageSquare, Bookmark, ExternalLink,
   CreditCard, Crown, Menu
 } from 'lucide-react';
@@ -76,6 +76,7 @@ interface AppState {
   toast: ToastType | null;
   isProcessing: boolean;
   mobileMenuOpen: boolean;
+  isDemoAnalysis: boolean;
 }
 
 const PLATFORM_LABELS: Record<Platform, string> = {
@@ -125,7 +126,8 @@ export default function App() {
     analysisInput: {},
     toast: null,
     isProcessing: false,
-    mobileMenuOpen: false
+    mobileMenuOpen: false,
+    isDemoAnalysis: false
   });
 
   // Load initial data
@@ -211,9 +213,12 @@ export default function App() {
       return;
     }
 
-    setState(prev => ({ ...prev, isProcessing: true }));
+    setState(prev => ({ ...prev, isProcessing: true, isDemoAnalysis: true }));
 
     try {
+      // Use one analysis from the free plan (only decrements once per submission)
+      useAnalysis();
+      
       // Create project
       const project = createProject({
         title: input.content.substring(0, 50) + (input.content.length > 50 ? '...' : ''),
@@ -245,7 +250,7 @@ export default function App() {
       }));
     } catch {
       showToast('Analysis failed. Please try again.', 'error');
-      setState(prev => ({ ...prev, isProcessing: false }));
+      setState(prev => ({ ...prev, isProcessing: false, isDemoAnalysis: false }));
     }
   }, [state.analysisInput, state.remainingAnalyses, state.profile, showToast, navigate]);
 
@@ -1347,7 +1352,7 @@ function DashboardScreen({
             <h3>Analyze My Content</h3>
             <p>Get a detailed analysis and improvement blueprint</p>
           </div>
-          <ChevronRight size={24} />
+          <ChevronRight size={24} className="action-arrow" />
         </button>
 
         <button className="action-card" onClick={onCreateFromIdea}>
@@ -1358,7 +1363,7 @@ function DashboardScreen({
             <h3>Create From an Idea</h3>
             <p>Turn your rough idea into optimized content</p>
           </div>
-          <ChevronRight size={24} />
+          <ChevronRight size={24} className="action-arrow" />
         </button>
       </div>
 
@@ -1479,11 +1484,22 @@ function DashboardScreen({
         .action-content h3 {
           font-size: var(--font-size-lg);
           margin-bottom: var(--spacing-xs);
+          color: var(--color-white);
         }
 
         .action-content p {
           font-size: var(--font-size-sm);
           color: var(--color-gray-400);
+        }
+
+        .action-arrow {
+          color: var(--color-gray-400);
+          transition: color var(--transition-fast), transform var(--transition-fast);
+        }
+
+        .action-card:hover .action-arrow {
+          color: var(--color-bright-cyan);
+          transform: translateX(4px);
         }
 
         .dashboard-stats {
@@ -1955,6 +1971,11 @@ function AnalysisProgressScreen({
   return (
     <div className="progress-screen">
       <div className="progress-content">
+        <div className="demo-notice">
+          <Info size={16} />
+          <span>Demo analysis — live AI scoring is not connected yet.</span>
+        </div>
+
         <div className="progress-animation">
           <div className="pulse-ring"></div>
           <div className="pulse-ring delay-1"></div>
@@ -2001,6 +2022,20 @@ function AnalysisProgressScreen({
         .progress-content {
           text-align: center;
           max-width: 400px;
+        }
+
+        .demo-notice {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-sm) var(--spacing-md);
+          background: rgba(59, 130, 246, 0.1);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: var(--radius-md);
+          margin-bottom: var(--spacing-lg);
+          color: var(--color-bright-cyan);
+          font-size: var(--font-size-sm);
         }
 
         .progress-animation {
@@ -2140,6 +2175,11 @@ function ViralScoreScreen({
         <p className="text-muted">Here's how your content measures up</p>
       </div>
 
+      <div className="demo-notice">
+        <Info size={16} />
+        <span>Demo analysis — live AI scoring is not connected yet.</span>
+      </div>
+
       <div className="score-overview">
         <div className="score-circle-large">
           <svg viewBox="0 0 180 180" className="score-svg">
@@ -2219,6 +2259,20 @@ function ViralScoreScreen({
         .score-header {
           text-align: center;
           margin-bottom: var(--spacing-xl);
+        }
+
+        .score-screen .demo-notice {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-sm) var(--spacing-md);
+          background: rgba(59, 130, 246, 0.1);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: var(--radius-md);
+          margin-bottom: var(--spacing-lg);
+          color: var(--color-bright-cyan);
+          font-size: var(--font-size-sm);
         }
 
         .score-overview {
@@ -2331,6 +2385,11 @@ function BlueprintScreen({
       </button>
 
       <h2 className="mb-xl">Improvement Blueprint</h2>
+
+      <div className="demo-notice">
+        <Info size={16} />
+        <span>Demo analysis — live AI scoring is not connected yet.</span>
+      </div>
 
       <div className="blueprint-section">
         <div className="section-header">
@@ -2500,6 +2559,19 @@ function BlueprintScreen({
 
         .back-btn {
           margin-bottom: var(--spacing-lg);
+        }
+
+        .blueprint-screen .demo-notice {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-sm) var(--spacing-md);
+          background: rgba(59, 130, 246, 0.1);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: var(--radius-md);
+          margin-bottom: var(--spacing-lg);
+          color: var(--color-bright-cyan);
+          font-size: var(--font-size-sm);
         }
 
         .blueprint-section {
@@ -4061,12 +4133,12 @@ function PlansScreen({
           <div className="plan-header">
             <h3>Pro Plan</h3>
             <div className="plan-price">
-              <span className="price">$39.99 - $49.99</span>
+              <span className="price">Price coming soon</span>
               <span className="period">per month</span>
             </div>
           </div>
           <ul className="plan-features">
-            <li><Check size={16} /> Unlimited content analyses</li>
+            <li><Check size={16} /> Monthly analysis allowance</li>
             <li><Check size={16} /> All scoring categories</li>
             <li><Check size={16} /> Advanced improvement blueprints</li>
             <li><Check size={16} /> Script Studio access</li>
@@ -4089,8 +4161,8 @@ function PlansScreen({
         <AlertTriangle size={18} />
         <p>
           Payment processing is not yet active. This interface is prepared for the Pro plan 
-          which will be priced between $39.99 and $49.99 per month. The specific price will 
-          be set by the product owner before activation.
+          which will be priced once selected by the product owner. The specific price and 
+          feature limits will be set before activation.
         </p>
       </div>
 
