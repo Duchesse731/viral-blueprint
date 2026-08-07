@@ -2,7 +2,19 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { CreatorProfile, Project, FreePlan, Platform, ContentGoal, ContentTone, AnalysisInput, AnalysisResult, ContentType, Toast as ToastType, ScoreLabel, UploadedFile } from '@/types';
+import { UserAccount, RegisterData, LoginData, getPasswordStrengthScore } from '@/types/auth';
 import { getProfile, saveProfile, isOnboarded, getProjects, createProject, updateProject, deleteProject, duplicateProject, getProject, saveAnalysisResult, getRemainingAnalyses, useAnalysis, exportReport } from '@/services/storeService';
+import { 
+  register as performRegister, 
+  login as performLogin, 
+  logout as performLogout,
+  requestPasswordReset,
+  getAuthState,
+  getAuthStatusMessage,
+  deleteAccount as performDeleteAccount,
+  validateRegistrationData,
+  validateLoginData
+} from '@/services/authService';
 import { analyzeContent, getScoreLabel, getScoreLabelText } from '@/services/analysisService';
 import { 
   processUpload, 
@@ -17,11 +29,11 @@ import {
   ChevronRight, ArrowLeft, Copy, Download, Trash2,
   Check, X, AlertTriangle, Clock, TrendingUp, Zap,
   Target, Eye, Users, ShoppingCart, MessageCircle,
-  Play, Edit3, RefreshCw, Save, Settings, LogOut,
+  Play, Edit3, RefreshCw, Save, Settings, LogOut, LogIn,
   Upload, Link, FileCode, Camera, Video, Hash,
-  Share2, Star, Award, Info,
+  Share2, Star, Award, Info, Mail, Lock, Eye as EyeIcon, EyeOff, Loader, Shield, Key, UserPlus,
   ThumbsUp, MessageSquare, Bookmark, ExternalLink,
-  CreditCard, Crown, Menu
+  CreditCard, Crown, Menu, Trash
 } from 'lucide-react';
 
 // Custom social media icons
@@ -57,9 +69,15 @@ function TikTokIcon({ size = 24 }: { size?: number }) {
   );
 }
 
-// Screen types
-type Screen = 
+// Screen types (extended with auth screens)
+type AuthScreen = 
   | 'welcome'
+  | 'login' 
+  | 'register'
+  | 'forgot-password'
+  | 'reset-password';
+
+type MainScreen = 
   | 'onboarding'
   | 'home'
   | 'new-analysis'
@@ -72,10 +90,1928 @@ type Screen =
   | 'projects'
   | 'project-details'
   | 'plans'
-  | 'settings';
+  | 'settings'
+  | 'account';
+
+type Screen = AuthScreen | MainScreen;
+
+// ============================================================================
+// AUTH SCREENS
+// ============================================================================
+
+// Welcome Screen
+function WelcomeScreen({ onGetStarted, onLogin }: { onGetStarted: () => void; onLogin: () => void }) {
+  return (
+    <div className="welcome-screen">
+      <div className="welcome-content">
+        <div className="welcome-logo">
+          <div className="logo-icon">
+            <div className="logo-grid">
+              <svg viewBox="0 0 100 100" width="120" height="120">
+                <rect x="10" y="10" width="80" height="80" fill="none" stroke="var(--color-electric-purple)" strokeWidth="1" opacity="0.3" />
+                <rect x="20" y="20" width="60" height="60" fill="none" stroke="var(--color-electric-purple)" strokeWidth="1" opacity="0.4" />
+                <rect x="30" y="30" width="40" height="40" fill="none" stroke="var(--color-bright-cyan)" strokeWidth="1" opacity="0.5" />
+                <polygon points="40,35 40,65 65,50" fill="var(--color-electric-purple)" />
+                <line x1="20" y1="20" x2="80" y2="80" stroke="var(--color-bright-cyan)" strokeWidth="0.5" opacity="0.3" />
+                <line x1="80" y1="20" x2="20" y2="80" stroke="var(--color-bright-cyan)" strokeWidth="0.5" opacity="0.3" />
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <h1 className="welcome-title">
+          <span className="text-gradient">Viral Blueprint</span>
+        </h1>
+
+        <p className="welcome-subtitle">
+          Evaluate and improve your content before publishing. Get practical 
+          improvement blueprints based on real, explainable criteria.
+        </p>
+
+        <div className="welcome-disclaimer">
+          <AlertTriangle size={18} />
+          <span>
+            Viral Blueprint improves content preparation but cannot guarantee 
+            viral performance. Success depends on timing, audience engagement, 
+            and platform algorithms.
+          </span>
+        </div>
+
+        <div className="welcome-actions">
+          <button className="btn btn-primary btn-lg full-width" onClick={onGetStarted}>
+            <UserPlus size={20} />
+            Get Started
+          </button>
+          <button className="btn btn-secondary btn-lg full-width" onClick={onLogin}>
+            <LogIn size={20} />
+            Log In
+          </button>
+        </div>
+
+        <div className="auth-status-notice">
+          <Shield size={16} />
+          <span>{getAuthStatusMessage()}</span>
+        </div>
+
+        <div className="welcome-platforms">
+          <span className="text-muted text-sm">Supports content for:</span>
+          <div className="platform-icons">
+            <FacebookIcon size={24} />
+            <InstagramIcon size={24} />
+            <YoutubeIcon size={24} />
+            <TikTokIcon size={24} />
+          </div>
+        </div>
+      </div>
+
+      <style jsx>{`
+        .welcome-screen {
+          min-height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: var(--spacing-xl);
+        }
+
+        .welcome-content {
+          max-width: 500px;
+          text-align: center;
+        }
+
+        .welcome-logo {
+          margin-bottom: var(--spacing-xl);
+        }
+
+        .logo-icon {
+          display: inline-block;
+          animation: glow 3s ease-in-out infinite;
+        }
+
+        .welcome-title {
+          font-size: var(--font-size-5xl);
+          margin-bottom: var(--spacing-lg);
+        }
+
+        .welcome-subtitle {
+          font-size: var(--font-size-lg);
+          color: var(--color-gray-300);
+          margin-bottom: var(--spacing-xl);
+          line-height: 1.7;
+        }
+
+        .welcome-disclaimer {
+          display: flex;
+          align-items: flex-start;
+          gap: var(--spacing-md);
+          background: rgba(245, 158, 11, 0.1);
+          border: 1px solid rgba(245, 158, 11, 0.3);
+          border-radius: var(--radius-md);
+          padding: var(--spacing-md);
+          margin-bottom: var(--spacing-xl);
+          text-align: left;
+          color: var(--color-warning-light);
+          font-size: var(--font-size-sm);
+        }
+
+        .welcome-actions {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-md);
+          margin-bottom: var(--spacing-lg);
+        }
+
+        .btn-secondary {
+          background: var(--color-gray-800);
+          border: 2px solid var(--color-gray-700);
+          color: var(--color-white);
+        }
+
+        .btn-secondary:hover {
+          border-color: var(--color-electric-purple);
+          background: rgba(139, 92, 246, 0.1);
+        }
+
+        .auth-status-notice {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-sm) var(--spacing-md);
+          background: rgba(59, 130, 246, 0.1);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: var(--radius-md);
+          margin-bottom: var(--spacing-xl);
+          color: var(--color-bright-cyan);
+          font-size: var(--font-size-sm);
+        }
+
+        .welcome-platforms {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: var(--spacing-md);
+        }
+
+        .platform-icons {
+          display: flex;
+          gap: var(--spacing-lg);
+          color: var(--color-gray-500);
+        }
+
+        @media (max-width: 640px) {
+          .welcome-title {
+            font-size: var(--font-size-4xl);
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// Log In Screen
+function LoginScreen({ onLogin, onBack, onRegister, onForgotPassword }: {
+  onLogin: (user: UserAccount) => void;
+  onBack: () => void;
+  onRegister: () => void;
+  onForgotPassword: () => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [error, setError] = useState('');
+
+  const handleSubmit = async () => {
+    const validation = validateLoginData({ email, password, rememberMe });
+    if (!validation.isValid) {
+      setErrors(validation.errors);
+      return;
+    }
+
+    setErrors({});
+    setError('');
+    setIsLoading(true);
+
+    try {
+      const result = await performLogin({ email, password, rememberMe });
+      
+      if (result.success && result.user) {
+        onLogin(result.user);
+      } else {
+        setError(result.error || 'Login failed. Please try again.');
+      }
+    } catch {
+      setError('An unexpected error occurred.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="auth-screen">
+      <button className="btn btn-ghost back-btn" onClick={onBack}>
+        <ArrowLeft size={20} />
+        Back
+      </button>
+
+      <div className="auth-card">
+        <div className="auth-header">
+          <div className="auth-icon">
+            <User size={32} />
+          </div>
+          <h2>Welcome Back</h2>
+          <p>Log in to your Viral Blueprint account</p>
+        </div>
+
+        <div className="auth-status-notice">
+          <Shield size={16} />
+          <span>{getAuthStatusMessage()}</span>
+        </div>
+
+        {error && (
+          <div className="auth-error">
+            <AlertTriangle size={18} />
+            {error}
+          </div>
+        )}
+
+        <div className="auth-form">
+          <div className="form-group">
+            <label>Email Address</label>
+            <div className="input-with-icon">
+              <Mail size={18} className="input-icon" />
+              <input
+                type="email"
+                className={`form-input with-icon ${errors.email ? 'error' : ''}`}
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={isLoading}
+              />
+            </div>
+            {errors.email && <span className="error-text">{errors.email}</span>}
+          </div>
+
+          <div className="form-group">
+            <label>Password</label>
+            <div className="input-with-icon">
+              <Lock size={18} className="input-icon" />
+              <input
+                type={showPassword ? 'text' : 'password'}
+                className={`form-input with-icon ${errors.password ? 'error' : ''}`}
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={isLoading}
+              />
+              <button
+                type="button"
+                className="password-toggle"
+                onClick={() => setShowPassword(!showPassword)}
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff size={18} /> : <EyeIcon size={18} />}
+              </button>
+            </div>
+            {errors.password && <span className="error-text">{errors.password}</span>}
+          </div>
+
+          <div className="form-row-between">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                disabled={isLoading}
+              />
+              <span>Remember me</span>
+            </label>
+            <button className="link-btn" onClick={onForgotPassword}>
+              Forgot Password?
+            </button>
+          </div>
+
+          <button
+            className="btn btn-primary btn-lg full-width"
+            onClick={handleSubmit}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <>
+                <Loader size={20} className="spinner" />
+                Logging in...
+              </>
+            ) : (
+              <>
+                <LogIn size={20} />
+                Log In
+              </>
+            )}
+          </button>
+        </div>
+
+        <div className="auth-footer">
+          <p>
+            Don't have an account?{' '}
+            <button className="link-btn" onClick={onRegister}>
+              Create Account
+            </button>
+          </p>
+        </div>
+      </div>
+
+      <style jsx>{`
+        .auth-screen {
+          min-height: 100vh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: var(--spacing-xl);
+        }
+
+        .back-btn {
+          position: absolute;
+          top: var(--spacing-lg);
+          left: var(--spacing-lg);
+        }
+
+        .auth-card {
+          width: 100%;
+          max-width: 420px;
+          background: var(--color-gray-800);
+          border: 1px solid var(--color-gray-700);
+          border-radius: var(--radius-xl);
+          padding: var(--spacing-xl);
+        }
+
+        .auth-header {
+          text-align: center;
+          margin-bottom: var(--spacing-lg);
+        }
+
+        .auth-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 64px;
+          height: 64px;
+          background: rgba(139, 92, 246, 0.1);
+          border-radius: var(--radius-full);
+          color: var(--color-electric-purple);
+          margin-bottom: var(--spacing-md);
+        }
+
+        .auth-header h2 {
+          margin-bottom: var(--spacing-xs);
+        }
+
+        .auth-header p {
+          color: var(--color-gray-400);
+        }
+
+        .auth-status-notice {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-sm) var(--spacing-md);
+          background: rgba(59, 130, 246, 0.1);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: var(--radius-md);
+          margin-bottom: var(--spacing-lg);
+          color: var(--color-bright-cyan);
+          font-size: var(--font-size-sm);
+        }
+
+        .auth-error {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-md);
+          background: rgba(239, 68, 68, 0.1);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          border-radius: var(--radius-md);
+          margin-bottom: var(--spacing-lg);
+          color: var(--color-error);
+        }
+
+        .auth-form {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-lg);
+        }
+
+        .form-group {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-xs);
+        }
+
+        .form-group label {
+          font-size: var(--font-size-sm);
+          font-weight: 500;
+          color: var(--color-gray-300);
+        }
+
+        .input-with-icon {
+          position: relative;
+        }
+
+        .input-icon {
+          position: absolute;
+          left: var(--spacing-md);
+          top: 50%;
+          transform: translateY(-50%);
+          color: var(--color-gray-500);
+        }
+
+        .input-with-icon input {
+          padding-left: calc(var(--spacing-md) + 28px);
+          padding-right: calc(var(--spacing-md) + 36px);
+        }
+
+        .input-with-icon input.error {
+          border-color: var(--color-error);
+        }
+
+        .password-toggle {
+          position: absolute;
+          right: var(--spacing-sm);
+          top: 50%;
+          transform: translateY(-50%);
+          background: none;
+          border: none;
+          color: var(--color-gray-500);
+          cursor: pointer;
+          padding: var(--spacing-xs);
+        }
+
+        .password-toggle:hover {
+          color: var(--color-white);
+        }
+
+        .error-text {
+          font-size: var(--font-size-sm);
+          color: var(--color-error);
+        }
+
+        .form-row-between {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+
+        .checkbox-label {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-sm);
+          cursor: pointer;
+          font-size: var(--font-size-sm);
+          color: var(--color-gray-400);
+        }
+
+        .checkbox-label input {
+          width: 18px;
+          height: 18px;
+          accent-color: var(--color-electric-purple);
+        }
+
+        .link-btn {
+          background: none;
+          border: none;
+          color: var(--color-electric-purple);
+          cursor: pointer;
+          font-size: var(--font-size-sm);
+          padding: 0;
+        }
+
+        .link-btn:hover {
+          text-decoration: underline;
+        }
+
+        .auth-footer {
+          margin-top: var(--spacing-xl);
+          text-align: center;
+          color: var(--color-gray-400);
+          font-size: var(--font-size-sm);
+        }
+
+        .spinner {
+          animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// Register Screen
+function RegisterScreen({ onRegister, onBack, onLogin }: {
+  onRegister: (user: UserAccount) => void;
+  onBack: () => void;
+  onLogin: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [error, setError] = useState('');
+
+  const passwordStrength = getPasswordStrengthScore(password);
+
+  const getStrengthColor = () => {
+    if (passwordStrength < 40) return 'var(--color-error)';
+    if (passwordStrength < 70) return 'var(--color-warning-light)';
+    return 'var(--color-success)';
+  };
+
+  const getStrengthLabel = () => {
+    if (passwordStrength < 40) return 'Weak';
+    if (passwordStrength < 70) return 'Medium';
+    return 'Strong';
+  };
+
+  const handleSubmit = async () => {
+    const validation = validateRegistrationData({
+      name,
+      email,
+      password,
+      confirmPassword,
+      acceptTerms
+    });
+    
+    if (!validation.isValid) {
+      setErrors(validation.errors);
+      return;
+    }
+
+    setErrors({});
+    setError('');
+    setIsLoading(true);
+
+    try {
+      const result = await performRegister({
+        name,
+        email,
+        password,
+        confirmPassword,
+        acceptTerms
+      });
+      
+      if (result.success && result.user) {
+        onRegister(result.user);
+      } else {
+        setError(result.error || 'Registration failed. Please try again.');
+      }
+    } catch {
+      setError('An unexpected error occurred.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="auth-screen">
+      <button className="btn btn-ghost back-btn" onClick={onBack}>
+        <ArrowLeft size={20} />
+        Back
+      </button>
+
+      <div className="auth-card">
+        <div className="auth-header">
+          <div className="auth-icon">
+            <UserPlus size={32} />
+          </div>
+          <h2>Create Account</h2>
+          <p>Start your content optimization journey</p>
+        </div>
+
+        <div className="auth-status-notice">
+          <Shield size={16} />
+          <span>{getAuthStatusMessage()}</span>
+        </div>
+
+        {error && (
+          <div className="auth-error">
+            <AlertTriangle size={18} />
+            {error}
+          </div>
+        )}
+
+        <div className="auth-form">
+          <div className="form-group">
+            <label>Full Name</label>
+            <div className="input-with-icon">
+              <User size={18} className="input-icon" />
+              <input
+                type="text"
+                className={`form-input with-icon ${errors.name ? 'error' : ''}`}
+                placeholder="John Doe"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                disabled={isLoading}
+              />
+            </div>
+            {errors.name && <span className="error-text">{errors.name}</span>}
+          </div>
+
+          <div className="form-group">
+            <label>Email Address</label>
+            <div className="input-with-icon">
+              <Mail size={18} className="input-icon" />
+              <input
+                type="email"
+                className={`form-input with-icon ${errors.email ? 'error' : ''}`}
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={isLoading}
+              />
+            </div>
+            {errors.email && <span className="error-text">{errors.email}</span>}
+          </div>
+
+          <div className="form-group">
+            <label>Password</label>
+            <div className="input-with-icon">
+              <Lock size={18} className="input-icon" />
+              <input
+                type={showPassword ? 'text' : 'password'}
+                className={`form-input with-icon ${errors.password ? 'error' : ''}`}
+                placeholder="Create a strong password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={isLoading}
+              />
+              <button
+                type="button"
+                className="password-toggle"
+                onClick={() => setShowPassword(!showPassword)}
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff size={18} /> : <EyeIcon size={18} />}
+              </button>
+            </div>
+            {password && (
+              <div className="password-strength">
+                <div className="strength-bar">
+                  <div 
+                    className="strength-fill" 
+                    style={{ 
+                      width: `${passwordStrength}%`,
+                      backgroundColor: getStrengthColor()
+                    }} 
+                  />
+                </div>
+                <span style={{ color: getStrengthColor() }}>{getStrengthLabel()}</span>
+              </div>
+            )}
+            {errors.password && <span className="error-text">{errors.password}</span>}
+            <p className="password-hint">Min 8 characters with uppercase, lowercase, number, and special character</p>
+          </div>
+
+          <div className="form-group">
+            <label>Confirm Password</label>
+            <div className="input-with-icon">
+              <Lock size={18} className="input-icon" />
+              <input
+                type={showPassword ? 'text' : 'password'}
+                className={`form-input with-icon ${errors.confirmPassword ? 'error' : ''}`}
+                placeholder="Confirm your password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                disabled={isLoading}
+              />
+            </div>
+            {errors.confirmPassword && <span className="error-text">{errors.confirmPassword}</span>}
+          </div>
+
+          <div className="form-group">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={acceptTerms}
+                onChange={(e) => setAcceptTerms(e.target.checked)}
+                disabled={isLoading}
+              />
+              <span>
+                I accept the{' '}
+                <button className="link-btn">Terms of Service</button>
+                {' '}and{' '}
+                <button className="link-btn">Privacy Policy</button>
+              </span>
+            </label>
+            {errors.acceptTerms && <span className="error-text">{errors.acceptTerms}</span>}
+          </div>
+
+          <button
+            className="btn btn-primary btn-lg full-width"
+            onClick={handleSubmit}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <>
+                <Loader size={20} className="spinner" />
+                Creating account...
+              </>
+            ) : (
+              <>
+                <UserPlus size={20} />
+                Create Account
+              </>
+            )}
+          </button>
+        </div>
+
+        <div className="auth-footer">
+          <p>
+            Already have an account?{' '}
+            <button className="link-btn" onClick={onLogin}>
+              Log In
+            </button>
+          </p>
+        </div>
+      </div>
+
+      <style jsx>{`
+        .auth-screen {
+          min-height: 100vh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: var(--spacing-xl);
+        }
+
+        .back-btn {
+          position: absolute;
+          top: var(--spacing-lg);
+          left: var(--spacing-lg);
+        }
+
+        .auth-card {
+          width: 100%;
+          max-width: 420px;
+          background: var(--color-gray-800);
+          border: 1px solid var(--color-gray-700);
+          border-radius: var(--radius-xl);
+          padding: var(--spacing-xl);
+        }
+
+        .auth-header {
+          text-align: center;
+          margin-bottom: var(--spacing-lg);
+        }
+
+        .auth-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 64px;
+          height: 64px;
+          background: rgba(139, 92, 246, 0.1);
+          border-radius: var(--radius-full);
+          color: var(--color-electric-purple);
+          margin-bottom: var(--spacing-md);
+        }
+
+        .auth-header h2 {
+          margin-bottom: var(--spacing-xs);
+        }
+
+        .auth-header p {
+          color: var(--color-gray-400);
+        }
+
+        .auth-status-notice {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-sm) var(--spacing-md);
+          background: rgba(59, 130, 246, 0.1);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: var(--radius-md);
+          margin-bottom: var(--spacing-lg);
+          color: var(--color-bright-cyan);
+          font-size: var(--font-size-sm);
+        }
+
+        .auth-error {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-md);
+          background: rgba(239, 68, 68, 0.1);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          border-radius: var(--radius-md);
+          margin-bottom: var(--spacing-lg);
+          color: var(--color-error);
+        }
+
+        .auth-form {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-lg);
+        }
+
+        .form-group {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-xs);
+        }
+
+        .form-group label {
+          font-size: var(--font-size-sm);
+          font-weight: 500;
+          color: var(--color-gray-300);
+        }
+
+        .input-with-icon {
+          position: relative;
+        }
+
+        .input-icon {
+          position: absolute;
+          left: var(--spacing-md);
+          top: 50%;
+          transform: translateY(-50%);
+          color: var(--color-gray-500);
+        }
+
+        .input-with-icon input {
+          padding-left: calc(var(--spacing-md) + 28px);
+          padding-right: calc(var(--spacing-md) + 36px);
+        }
+
+        .input-with-icon input.error {
+          border-color: var(--color-error);
+        }
+
+        .password-toggle {
+          position: absolute;
+          right: var(--spacing-sm);
+          top: 50%;
+          transform: translateY(-50%);
+          background: none;
+          border: none;
+          color: var(--color-gray-500);
+          cursor: pointer;
+          padding: var(--spacing-xs);
+        }
+
+        .password-toggle:hover {
+          color: var(--color-white);
+        }
+
+        .error-text {
+          font-size: var(--font-size-sm);
+          color: var(--color-error);
+        }
+
+        .password-strength {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-sm);
+          margin-top: var(--spacing-xs);
+        }
+
+        .strength-bar {
+          flex: 1;
+          height: 4px;
+          background: var(--color-gray-700);
+          border-radius: 2px;
+          overflow: hidden;
+        }
+
+        .strength-fill {
+          height: 100%;
+          transition: width 0.3s ease;
+        }
+
+        .password-hint {
+          font-size: var(--font-size-xs);
+          color: var(--color-gray-500);
+          margin-top: var(--spacing-xs);
+        }
+
+        .checkbox-label {
+          display: flex;
+          align-items: flex-start;
+          gap: var(--spacing-sm);
+          cursor: pointer;
+          font-size: var(--font-size-sm);
+          color: var(--color-gray-400);
+        }
+
+        .checkbox-label input {
+          width: 18px;
+          height: 18px;
+          margin-top: 2px;
+          accent-color: var(--color-electric-purple);
+        }
+
+        .link-btn {
+          background: none;
+          border: none;
+          color: var(--color-electric-purple);
+          cursor: pointer;
+          font-size: var(--font-size-sm);
+          padding: 0;
+        }
+
+        .link-btn:hover {
+          text-decoration: underline;
+        }
+
+        .auth-footer {
+          margin-top: var(--spacing-xl);
+          text-align: center;
+          color: var(--color-gray-400);
+          font-size: var(--font-size-sm);
+        }
+
+        .spinner {
+          animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// Forgot Password Screen
+function ForgotPasswordScreen({ onBack, onLogin }: {
+  onBack: () => void;
+  onLogin: () => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async () => {
+    if (!email.trim()) {
+      setError('Please enter your email address');
+      return;
+    }
+
+    setError('');
+    setIsLoading(true);
+
+    try {
+      const result = await requestPasswordReset({ email });
+      
+      if (result.success) {
+        setIsSuccess(true);
+      } else {
+        setError(result.error || 'Failed to send reset email');
+      }
+    } catch {
+      setError('An unexpected error occurred');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="auth-screen">
+      <button className="btn btn-ghost back-btn" onClick={onBack}>
+        <ArrowLeft size={20} />
+        Back
+      </button>
+
+      <div className="auth-card">
+        <div className="auth-header">
+          <div className="auth-icon">
+            <Key size={32} />
+          </div>
+          <h2>Reset Password</h2>
+          <p>Enter your email to receive a reset link</p>
+        </div>
+
+        {isSuccess ? (
+          <div className="success-message">
+            <Check size={48} />
+            <h3>Check Your Email</h3>
+            <p>
+              We've sent a password reset link to <strong>{email}</strong>.
+              Please check your inbox and click the link to reset your password.
+            </p>
+            <p className="demo-note">
+              <Info size={16} />
+              Demo mode: In production, an actual email would be sent.
+            </p>
+            <button className="btn btn-primary btn-lg full-width" onClick={onLogin}>
+              <LogIn size={20} />
+              Back to Log In
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="auth-status-notice">
+              <Shield size={16} />
+              <span>{getAuthStatusMessage()}</span>
+            </div>
+
+            {error && (
+              <div className="auth-error">
+                <AlertTriangle size={18} />
+                {error}
+              </div>
+            )}
+
+            <div className="auth-form">
+              <div className="form-group">
+                <label>Email Address</label>
+                <div className="input-with-icon">
+                  <Mail size={18} className="input-icon" />
+                  <input
+                    type="email"
+                    className="form-input with-icon"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={isLoading}
+                  />
+                </div>
+              </div>
+
+              <button
+                className="btn btn-primary btn-lg full-width"
+                onClick={handleSubmit}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <>
+                    <Loader size={20} className="spinner" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Mail size={20} />
+                    Send Reset Link
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="auth-footer">
+              <p>
+                Remember your password?{' '}
+                <button className="link-btn" onClick={onLogin}>
+                  Log In
+                </button>
+              </p>
+            </div>
+          </>
+        )}
+      </div>
+
+      <style jsx>{`
+        .auth-screen {
+          min-height: 100vh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: var(--spacing-xl);
+        }
+
+        .back-btn {
+          position: absolute;
+          top: var(--spacing-lg);
+          left: var(--spacing-lg);
+        }
+
+        .auth-card {
+          width: 100%;
+          max-width: 420px;
+          background: var(--color-gray-800);
+          border: 1px solid var(--color-gray-700);
+          border-radius: var(--radius-xl);
+          padding: var(--spacing-xl);
+        }
+
+        .auth-header {
+          text-align: center;
+          margin-bottom: var(--spacing-lg);
+        }
+
+        .auth-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 64px;
+          height: 64px;
+          background: rgba(139, 92, 246, 0.1);
+          border-radius: var(--radius-full);
+          color: var(--color-electric-purple);
+          margin-bottom: var(--spacing-md);
+        }
+
+        .auth-header h2 {
+          margin-bottom: var(--spacing-xs);
+        }
+
+        .auth-header p {
+          color: var(--color-gray-400);
+        }
+
+        .auth-status-notice {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-sm) var(--spacing-md);
+          background: rgba(59, 130, 246, 0.1);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: var(--radius-md);
+          margin-bottom: var(--spacing-lg);
+          color: var(--color-bright-cyan);
+          font-size: var(--font-size-sm);
+        }
+
+        .auth-error {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-md);
+          background: rgba(239, 68, 68, 0.1);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          border-radius: var(--radius-md);
+          margin-bottom: var(--spacing-lg);
+          color: var(--color-error);
+        }
+
+        .success-message {
+          text-align: center;
+        }
+
+        .success-message :global(svg) {
+          color: var(--color-success);
+          margin-bottom: var(--spacing-md);
+        }
+
+        .success-message h3 {
+          margin-bottom: var(--spacing-md);
+        }
+
+        .success-message p {
+          color: var(--color-gray-400);
+          margin-bottom: var(--spacing-md);
+        }
+
+        .demo-note {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-sm) var(--spacing-md);
+          background: rgba(59, 130, 246, 0.1);
+          border-radius: var(--radius-md);
+          color: var(--color-bright-cyan);
+          font-size: var(--font-size-sm);
+          margin-bottom: var(--spacing-lg);
+        }
+
+        .auth-form {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-lg);
+        }
+
+        .form-group {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-xs);
+        }
+
+        .form-group label {
+          font-size: var(--font-size-sm);
+          font-weight: 500;
+          color: var(--color-gray-300);
+        }
+
+        .input-with-icon {
+          position: relative;
+        }
+
+        .input-icon {
+          position: absolute;
+          left: var(--spacing-md);
+          top: 50%;
+          transform: translateY(-50%);
+          color: var(--color-gray-500);
+        }
+
+        .input-with-icon input {
+          padding-left: calc(var(--spacing-md) + 28px);
+        }
+
+        .link-btn {
+          background: none;
+          border: none;
+          color: var(--color-electric-purple);
+          cursor: pointer;
+          font-size: var(--font-size-sm);
+          padding: 0;
+        }
+
+        .link-btn:hover {
+          text-decoration: underline;
+        }
+
+        .auth-footer {
+          margin-top: var(--spacing-xl);
+          text-align: center;
+          color: var(--color-gray-400);
+          font-size: var(--font-size-sm);
+        }
+
+        .spinner {
+          animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// Reset Password Screen
+function ResetPasswordScreen({ onSuccess, onBack }: {
+  onSuccess: () => void;
+  onBack: () => void;
+}) {
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [error, setError] = useState('');
+
+  // In a real app, this would come from the URL
+  const resetToken = 'demo-token';
+
+  const passwordStrength = getPasswordStrengthScore(newPassword);
+
+  const getStrengthColor = () => {
+    if (passwordStrength < 40) return 'var(--color-error)';
+    if (passwordStrength < 70) return 'var(--color-warning-light)';
+    return 'var(--color-success)';
+  };
+
+  const getStrengthLabel = () => {
+    if (passwordStrength < 40) return 'Weak';
+    if (passwordStrength < 70) return 'Medium';
+    return 'Strong';
+  };
+
+  const handleSubmit = async () => {
+    if (newPassword !== confirmPassword) {
+      setErrors({ confirmPassword: 'Passwords do not match' });
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setErrors({ newPassword: 'Password must be at least 8 characters' });
+      return;
+    }
+
+    setErrors({});
+    setError('');
+    setIsLoading(true);
+
+    try {
+      const result = await requestPasswordReset({ email: '' });
+      
+      // In demo mode, just show success
+      setIsSuccess(true);
+    } catch {
+      setError('An unexpected error occurred');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="auth-screen">
+      <button className="btn btn-ghost back-btn" onClick={onBack}>
+        <ArrowLeft size={20} />
+        Back
+      </button>
+
+      <div className="auth-card">
+        <div className="auth-header">
+          <div className="auth-icon">
+            <Lock size={32} />
+          </div>
+          <h2>Set New Password</h2>
+          <p>Create a new secure password for your account</p>
+        </div>
+
+        {isSuccess ? (
+          <div className="success-message">
+            <Check size={48} />
+            <h3>Password Reset Complete</h3>
+            <p>Your password has been successfully reset.</p>
+            <p className="demo-note">
+              <Info size={16} />
+              Demo mode: In production, your password would be updated securely.
+            </p>
+            <button className="btn btn-primary btn-lg full-width" onClick={onSuccess}>
+              <LogIn size={20} />
+              Continue to Log In
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="auth-status-notice">
+              <Shield size={16} />
+              <span>{getAuthStatusMessage()}</span>
+            </div>
+
+            {error && (
+              <div className="auth-error">
+                <AlertTriangle size={18} />
+                {error}
+              </div>
+            )}
+
+            <div className="auth-form">
+              <div className="form-group">
+                <label>New Password</label>
+                <div className="input-with-icon">
+                  <Lock size={18} className="input-icon" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    className={`form-input with-icon ${errors.newPassword ? 'error' : ''}`}
+                    placeholder="Create a strong password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    disabled={isLoading}
+                  />
+                  <button
+                    type="button"
+                    className="password-toggle"
+                    onClick={() => setShowPassword(!showPassword)}
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <EyeIcon size={18} />}
+                  </button>
+                </div>
+                {newPassword && (
+                  <div className="password-strength">
+                    <div className="strength-bar">
+                      <div 
+                        className="strength-fill" 
+                        style={{ 
+                          width: `${passwordStrength}%`,
+                          backgroundColor: getStrengthColor()
+                        }} 
+                      />
+                    </div>
+                    <span style={{ color: getStrengthColor() }}>{getStrengthLabel()}</span>
+                  </div>
+                )}
+                {errors.newPassword && <span className="error-text">{errors.newPassword}</span>}
+                <p className="password-hint">Min 8 characters with uppercase, lowercase, number, and special character</p>
+              </div>
+
+              <div className="form-group">
+                <label>Confirm New Password</label>
+                <div className="input-with-icon">
+                  <Lock size={18} className="input-icon" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    className={`form-input with-icon ${errors.confirmPassword ? 'error' : ''}`}
+                    placeholder="Confirm your password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    disabled={isLoading}
+                  />
+                </div>
+                {errors.confirmPassword && <span className="error-text">{errors.confirmPassword}</span>}
+              </div>
+
+              <button
+                className="btn btn-primary btn-lg full-width"
+                onClick={handleSubmit}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <>
+                    <Loader size={20} className="spinner" />
+                    Resetting...
+                  </>
+                ) : (
+                  <>
+                    <Lock size={20} />
+                    Reset Password
+                  </>
+                )}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <style jsx>{`
+        .auth-screen {
+          min-height: 100vh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: var(--spacing-xl);
+        }
+
+        .back-btn {
+          position: absolute;
+          top: var(--spacing-lg);
+          left: var(--spacing-lg);
+        }
+
+        .auth-card {
+          width: 100%;
+          max-width: 420px;
+          background: var(--color-gray-800);
+          border: 1px solid var(--color-gray-700);
+          border-radius: var(--radius-xl);
+          padding: var(--spacing-xl);
+        }
+
+        .auth-header {
+          text-align: center;
+          margin-bottom: var(--spacing-lg);
+        }
+
+        .auth-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 64px;
+          height: 64px;
+          background: rgba(139, 92, 246, 0.1);
+          border-radius: var(--radius-full);
+          color: var(--color-electric-purple);
+          margin-bottom: var(--spacing-md);
+        }
+
+        .auth-header h2 {
+          margin-bottom: var(--spacing-xs);
+        }
+
+        .auth-header p {
+          color: var(--color-gray-400);
+        }
+
+        .auth-status-notice {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-sm) var(--spacing-md);
+          background: rgba(59, 130, 246, 0.1);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: var(--radius-md);
+          margin-bottom: var(--spacing-lg);
+          color: var(--color-bright-cyan);
+          font-size: var(--font-size-sm);
+        }
+
+        .auth-error {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-md);
+          background: rgba(239, 68, 68, 0.1);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          border-radius: var(--radius-md);
+          margin-bottom: var(--spacing-lg);
+          color: var(--color-error);
+        }
+
+        .success-message {
+          text-align: center;
+        }
+
+        .success-message :global(svg) {
+          color: var(--color-success);
+          margin-bottom: var(--spacing-md);
+        }
+
+        .success-message h3 {
+          margin-bottom: var(--spacing-md);
+        }
+
+        .success-message p {
+          color: var(--color-gray-400);
+          margin-bottom: var(--spacing-md);
+        }
+
+        .demo-note {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-sm) var(--spacing-md);
+          background: rgba(59, 130, 246, 0.1);
+          border-radius: var(--radius-md);
+          color: var(--color-bright-cyan);
+          font-size: var(--font-size-sm);
+          margin-bottom: var(--spacing-lg);
+        }
+
+        .auth-form {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-lg);
+        }
+
+        .form-group {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-xs);
+        }
+
+        .form-group label {
+          font-size: var(--font-size-sm);
+          font-weight: 500;
+          color: var(--color-gray-300);
+        }
+
+        .input-with-icon {
+          position: relative;
+        }
+
+        .input-icon {
+          position: absolute;
+          left: var(--spacing-md);
+          top: 50%;
+          transform: translateY(-50%);
+          color: var(--color-gray-500);
+        }
+
+        .input-with-icon input {
+          padding-left: calc(var(--spacing-md) + 28px);
+          padding-right: calc(var(--spacing-md) + 36px);
+        }
+
+        .input-with-icon input.error {
+          border-color: var(--color-error);
+        }
+
+        .password-toggle {
+          position: absolute;
+          right: var(--spacing-sm);
+          top: 50%;
+          transform: translateY(-50%);
+          background: none;
+          border: none;
+          color: var(--color-gray-500);
+          cursor: pointer;
+          padding: var(--spacing-xs);
+        }
+
+        .password-toggle:hover {
+          color: var(--color-white);
+        }
+
+        .error-text {
+          font-size: var(--font-size-sm);
+          color: var(--color-error);
+        }
+
+        .password-strength {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-sm);
+          margin-top: var(--spacing-xs);
+        }
+
+        .strength-bar {
+          flex: 1;
+          height: 4px;
+          background: var(--color-gray-700);
+          border-radius: 2px;
+          overflow: hidden;
+        }
+
+        .strength-fill {
+          height: 100%;
+          transition: width 0.3s ease;
+        }
+
+        .password-hint {
+          font-size: var(--font-size-xs);
+          color: var(--color-gray-500);
+          margin-top: var(--spacing-xs);
+        }
+
+        .spinner {
+          animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// Account Settings Screen
+function AccountSettingsScreen({ user, onDeleteAccount, onBack }: {
+  user: UserAccount;
+  onDeleteAccount: () => void;
+  onBack: () => void;
+}) {
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+
+  const handleDeleteAccount = () => {
+    if (deleteConfirmText === 'DELETE') {
+      onDeleteAccount();
+    }
+  };
+
+  return (
+    <div className="settings-screen">
+      <button className="btn btn-ghost back-btn" onClick={onBack}>
+        <ArrowLeft size={20} />
+        Back to Settings
+      </button>
+
+      <div className="settings-header">
+        <h2>Account Settings</h2>
+        <p>Manage your account information and preferences</p>
+      </div>
+
+      <div className="settings-card">
+        <h3>Account Information</h3>
+        <div className="info-row">
+          <span className="info-label">Name</span>
+          <span className="info-value">{user.name}</span>
+        </div>
+        <div className="info-row">
+          <span className="info-label">Email</span>
+          <span className="info-value">{user.email}</span>
+        </div>
+        <div className="info-row">
+          <span className="info-label">Email Verified</span>
+          <span className="info-value">
+            {user.emailVerified ? (
+              <span className="badge success"><Check size={14} /> Verified</span>
+            ) : (
+              <span className="badge warning"><AlertTriangle size={14} /> Not Verified</span>
+            )}
+          </span>
+        </div>
+        <div className="info-row">
+          <span className="info-label">Member Since</span>
+          <span className="info-value">{new Date(user.createdAt).toLocaleDateString()}</span>
+        </div>
+      </div>
+
+      <div className="settings-card danger-zone">
+        <h3>Danger Zone</h3>
+        <p className="danger-description">
+          Deleting your account will permanently remove all your data, including:
+        </p>
+        <ul>
+          <li>Your profile and preferences</li>
+          <li>All projects and analysis results</li>
+          <li>Your subscription and billing information</li>
+        </ul>
+        
+        {showDeleteConfirm ? (
+          <div className="delete-confirm">
+            <p>
+              Type <strong>DELETE</strong> to confirm:
+            </p>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="DELETE"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+            />
+            <div className="delete-actions">
+              <button 
+                className="btn btn-ghost"
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  setDeleteConfirmText('');
+                }}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn btn-danger"
+                onClick={handleDeleteAccount}
+                disabled={deleteConfirmText !== 'DELETE'}
+              >
+                <Trash size={16} />
+                Delete Account Permanently
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button 
+            className="btn btn-outline-danger"
+            onClick={() => setShowDeleteConfirm(true)}
+          >
+            <Trash size={16} />
+            Delete Account
+          </button>
+        )}
+      </div>
+
+      <style jsx>{`
+        .settings-screen {
+          max-width: 600px;
+          margin: 0 auto;
+          padding: var(--spacing-xl);
+        }
+
+        .back-btn {
+          margin-bottom: var(--spacing-lg);
+        }
+
+        .settings-header {
+          margin-bottom: var(--spacing-xl);
+        }
+
+        .settings-header h2 {
+          margin-bottom: var(--spacing-xs);
+        }
+
+        .settings-header p {
+          color: var(--color-gray-400);
+        }
+
+        .settings-card {
+          background: var(--color-gray-800);
+          border: 1px solid var(--color-gray-700);
+          border-radius: var(--radius-lg);
+          padding: var(--spacing-lg);
+          margin-bottom: var(--spacing-lg);
+        }
+
+        .settings-card h3 {
+          margin-bottom: var(--spacing-md);
+          padding-bottom: var(--spacing-md);
+          border-bottom: 1px solid var(--color-gray-700);
+        }
+
+        .info-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: var(--spacing-sm) 0;
+        }
+
+        .info-label {
+          color: var(--color-gray-400);
+        }
+
+        .info-value {
+          color: var(--color-white);
+        }
+
+        .badge {
+          display: inline-flex;
+          align-items: center;
+          gap: var(--spacing-xs);
+          padding: var(--spacing-xs) var(--spacing-sm);
+          border-radius: var(--radius-full);
+          font-size: var(--font-size-sm);
+        }
+
+        .badge.success {
+          background: rgba(34, 197, 94, 0.1);
+          color: var(--color-success);
+        }
+
+        .badge.warning {
+          background: rgba(245, 158, 11, 0.1);
+          color: var(--color-warning-light);
+        }
+
+        .danger-zone {
+          border-color: rgba(239, 68, 68, 0.3);
+        }
+
+        .danger-zone h3 {
+          color: var(--color-error);
+        }
+
+        .danger-description {
+          color: var(--color-gray-400);
+          margin-bottom: var(--spacing-md);
+        }
+
+        .danger-zone ul {
+          margin-bottom: var(--spacing-lg);
+          padding-left: var(--spacing-lg);
+          color: var(--color-gray-400);
+        }
+
+        .danger-zone li {
+          margin-bottom: var(--spacing-xs);
+        }
+
+        .btn-outline-danger {
+          background: transparent;
+          border: 2px solid var(--color-error);
+          color: var(--color-error);
+          padding: var(--spacing-sm) var(--spacing-md);
+          border-radius: var(--radius-md);
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: var(--spacing-sm);
+          transition: all var(--transition-fast);
+        }
+
+        .btn-outline-danger:hover {
+          background: rgba(239, 68, 68, 0.1);
+        }
+
+        .btn-danger {
+          background: var(--color-error);
+          border: none;
+          color: white;
+          padding: var(--spacing-sm) var(--spacing-md);
+          border-radius: var(--radius-md);
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: var(--spacing-sm);
+          transition: all var(--transition-fast);
+        }
+
+        .btn-danger:hover {
+          background: #dc2626;
+        }
+
+        .btn-danger:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .delete-confirm {
+          background: rgba(239, 68, 68, 0.05);
+          border: 1px solid rgba(239, 68, 68, 0.2);
+          border-radius: var(--radius-md);
+          padding: var(--spacing-lg);
+        }
+
+        .delete-confirm p {
+          margin-bottom: var(--spacing-md);
+          color: var(--color-gray-300);
+        }
+
+        .delete-actions {
+          display: flex;
+          gap: var(--spacing-md);
+          margin-top: var(--spacing-md);
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// ============================================================================
+// MAIN APP SCREEN
+// ============================================================================
 
 interface AppState {
   screen: Screen;
+  user: UserAccount | null;
+  isAuthenticated: boolean;
   profile: CreatorProfile | null;
   projects: Project[];
   currentProject: Project | null;
@@ -127,6 +2063,8 @@ const CONTENT_TYPE_LABELS: Record<ContentType, string> = {
 export default function App() {
   const [state, setState] = useState<AppState>({
     screen: 'welcome',
+    user: null,
+    isAuthenticated: false,
     profile: null,
     projects: [],
     currentProject: null,
@@ -138,30 +2076,82 @@ export default function App() {
     isDemoAnalysis: false
   });
 
-  // Load initial data
+  // Load initial data and check auth state
   useEffect(() => {
     const profile = getProfile();
     const onboarded = isOnboarded();
     const projects = getProjects();
     const remaining = getRemainingAnalyses();
+    const authState = getAuthState();
 
-    if (onboarded && profile) {
+    if (authState.isAuthenticated && authState.user) {
+      // User is authenticated - go to home or stay at current screen
       setState(prev => ({
         ...prev,
-        screen: 'home',
+        user: authState.user,
+        isAuthenticated: true,
         profile,
         projects,
-        remainingAnalyses: remaining
+        remainingAnalyses: remaining,
+        // If not authenticated, show welcome; otherwise check onboarding
+        screen: prev.screen === 'welcome' ? (onboarded && profile ? 'home' : 'onboarding') : prev.screen
       }));
     } else {
+      // Not authenticated - show welcome screen
       setState(prev => ({
         ...prev,
+        user: null,
+        isAuthenticated: false,
         profile,
         projects,
         remainingAnalyses: remaining
       }));
     }
   }, []);
+
+  // Handle user login
+  const handleLogin = useCallback((user: UserAccount) => {
+    const profile = getProfile();
+    const onboarded = isOnboarded();
+    
+    setState(prev => ({
+      ...prev,
+      user,
+      isAuthenticated: true,
+      profile,
+      // Go to onboarding if not onboarded, otherwise go to home
+      screen: onboarded && profile ? 'home' : 'onboarding'
+    }));
+  }, []);
+
+  // Handle user logout
+  const handleLogout = useCallback(async () => {
+    await performLogout();
+    
+    setState(prev => ({
+      ...prev,
+      user: null,
+      isAuthenticated: false,
+      profile: null,
+      screen: 'welcome'
+    }));
+  }, []);
+
+  // Handle account deletion
+  const handleDeleteAccount = useCallback(async () => {
+    if (state.user) {
+      await performDeleteAccount(state.user.id);
+      
+      setState(prev => ({
+        ...prev,
+        user: null,
+        isAuthenticated: false,
+        profile: null,
+        projects: [],
+        screen: 'welcome'
+      }));
+    }
+  }, [state.user]);
 
   // Show toast
   const showToast = useCallback((message: string, type: ToastType['type']) => {
@@ -346,11 +2336,64 @@ export default function App() {
 
   // Render based on current screen
   const renderScreen = () => {
+    // Auth screens (available without authentication)
+    if (state.screen === 'welcome') {
+      return (
+        <WelcomeScreen 
+          onGetStarted={() => navigate('register')} 
+          onLogin={() => navigate('login')}
+        />
+      );
+    }
+    if (state.screen === 'login') {
+      return (
+        <LoginScreen 
+          onLogin={handleLogin} 
+          onBack={() => navigate('welcome')} 
+          onRegister={() => navigate('register')}
+          onForgotPassword={() => navigate('forgot-password')}
+        />
+      );
+    }
+    if (state.screen === 'register') {
+      return (
+        <RegisterScreen 
+          onRegister={handleLogin} 
+          onBack={() => navigate('welcome')} 
+          onLogin={() => navigate('login')}
+        />
+      );
+    }
+    if (state.screen === 'forgot-password') {
+      return (
+        <ForgotPasswordScreen 
+          onBack={() => navigate('login')} 
+          onLogin={() => navigate('login')}
+        />
+      );
+    }
+    if (state.screen === 'reset-password') {
+      return (
+        <ResetPasswordScreen 
+          onSuccess={() => navigate('login')} 
+          onBack={() => navigate('login')}
+        />
+      );
+    }
+    
+    // Protected screens (require authentication)
+    if (!state.isAuthenticated) {
+      return (
+        <WelcomeScreen 
+          onGetStarted={() => navigate('register')} 
+          onLogin={() => navigate('login')}
+        />
+      );
+    }
+
     switch (state.screen) {
-      case 'welcome':
-        return <WelcomeScreen onGetStarted={() => navigate('onboarding')} />;
       case 'onboarding':
-        return <OnboardingScreen onComplete={completeOnboarding} onBack={() => navigate('welcome')} />;
+        return <OnboardingScreen onComplete={completeOnboarding} onBack={() => handleLogout()} />;
       case 'home':
         return (
           <DashboardScreen 
@@ -464,11 +2507,30 @@ export default function App() {
             profile={state.profile}
             onUpdateProfile={handleUpdateProfile}
             onBack={() => navigate('home')}
-            onSignOut={() => navigate('welcome')}
+            onSignOut={handleLogout}
+            onManageAccount={() => navigate('account')}
+          />
+        );
+      case 'account':
+        return state.user ? (
+          <AccountSettingsScreen 
+            user={state.user}
+            onDeleteAccount={handleDeleteAccount}
+            onBack={() => navigate('settings')}
+          />
+        ) : (
+          <WelcomeScreen 
+            onGetStarted={() => navigate('register')} 
+            onLogin={() => navigate('login')}
           />
         );
       default:
-        return <WelcomeScreen onGetStarted={() => navigate('onboarding')} />;
+        return (
+          <WelcomeScreen 
+            onGetStarted={() => navigate('register')} 
+            onLogin={() => navigate('login')}
+          />
+        );
     }
   };
 
@@ -891,138 +2953,6 @@ function MobileMenuContent({
         ))}
       </div>
     </>
-  );
-}
-
-// Welcome Screen
-function WelcomeScreen({ onGetStarted }: { onGetStarted: () => void }) {
-  return (
-    <div className="welcome-screen">
-      <div className="welcome-content">
-        <div className="welcome-logo">
-          <div className="logo-icon">
-            <div className="logo-grid">
-              <svg viewBox="0 0 100 100" width="120" height="120">
-                <rect x="10" y="10" width="80" height="80" fill="none" stroke="var(--color-electric-purple)" strokeWidth="1" opacity="0.3" />
-                <rect x="20" y="20" width="60" height="60" fill="none" stroke="var(--color-electric-purple)" strokeWidth="1" opacity="0.4" />
-                <rect x="30" y="30" width="40" height="40" fill="none" stroke="var(--color-bright-cyan)" strokeWidth="1" opacity="0.5" />
-                <polygon points="40,35 40,65 65,50" fill="var(--color-electric-purple)" />
-                <line x1="20" y1="20" x2="80" y2="80" stroke="var(--color-bright-cyan)" strokeWidth="0.5" opacity="0.3" />
-                <line x1="80" y1="20" x2="20" y2="80" stroke="var(--color-bright-cyan)" strokeWidth="0.5" opacity="0.3" />
-              </svg>
-            </div>
-          </div>
-        </div>
-
-        <h1 className="welcome-title">
-          <span className="text-gradient">Viral Blueprint</span>
-        </h1>
-
-        <p className="welcome-subtitle">
-          Evaluate and improve your content before publishing. Get practical 
-          improvement blueprints based on real, explainable criteria.
-        </p>
-
-        <div className="welcome-disclaimer">
-          <AlertTriangle size={18} />
-          <span>
-            Viral Blueprint improves content preparation but cannot guarantee 
-            viral performance. Success depends on timing, audience engagement, 
-            and platform algorithms.
-          </span>
-        </div>
-
-        <div className="welcome-actions">
-          <button className="btn btn-primary btn-lg" onClick={onGetStarted}>
-            Get Started
-            <ChevronRight size={20} />
-          </button>
-        </div>
-
-        <div className="welcome-platforms">
-          <span className="text-muted text-sm">Supports content for:</span>
-          <div className="platform-icons">
-            <FacebookIcon size={24} />
-            <InstagramIcon size={24} />
-            <YoutubeIcon size={24} />
-            <TikTokIcon size={24} />
-          </div>
-        </div>
-      </div>
-
-      <style jsx>{`
-        .welcome-screen {
-          min-height: 100vh;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: var(--spacing-xl);
-        }
-
-        .welcome-content {
-          max-width: 500px;
-          text-align: center;
-        }
-
-        .welcome-logo {
-          margin-bottom: var(--spacing-xl);
-        }
-
-        .logo-icon {
-          display: inline-block;
-          animation: glow 3s ease-in-out infinite;
-        }
-
-        .welcome-title {
-          font-size: var(--font-size-5xl);
-          margin-bottom: var(--spacing-lg);
-        }
-
-        .welcome-subtitle {
-          font-size: var(--font-size-lg);
-          color: var(--color-gray-300);
-          margin-bottom: var(--spacing-xl);
-          line-height: 1.7;
-        }
-
-        .welcome-disclaimer {
-          display: flex;
-          align-items: flex-start;
-          gap: var(--spacing-md);
-          background: rgba(245, 158, 11, 0.1);
-          border: 1px solid rgba(245, 158, 11, 0.3);
-          border-radius: var(--radius-md);
-          padding: var(--spacing-md);
-          margin-bottom: var(--spacing-xl);
-          text-align: left;
-          color: var(--color-warning-light);
-          font-size: var(--font-size-sm);
-        }
-
-        .welcome-actions {
-          margin-bottom: var(--spacing-3xl);
-        }
-
-        .welcome-platforms {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: var(--spacing-md);
-        }
-
-        .platform-icons {
-          display: flex;
-          gap: var(--spacing-lg);
-          color: var(--color-gray-500);
-        }
-
-        @media (max-width: 768px) {
-          .welcome-title {
-            font-size: var(--font-size-3xl);
-          }
-        }
-      `}</style>
-    </div>
   );
 }
 
@@ -4975,12 +6905,14 @@ function SettingsScreen({
   profile,
   onUpdateProfile,
   onBack,
-  onSignOut
+  onSignOut,
+  onManageAccount
 }: {
   profile: CreatorProfile | null;
   onUpdateProfile: (updates: Partial<CreatorProfile>) => void;
   onBack: () => void;
   onSignOut: () => void;
+  onManageAccount: () => void;
 }) {
   const [name, setName] = useState(profile?.name || '');
   const [niche, setNiche] = useState(profile?.niche || '');
@@ -5031,7 +6963,13 @@ function SettingsScreen({
         Back to Dashboard
       </button>
 
-      <h2 className="mb-xl">Account & Settings</h2>
+      <div className="settings-header-row">
+        <h2>Settings</h2>
+        <button className="btn btn-ghost" onClick={onManageAccount}>
+          <User size={18} />
+          Account Settings
+        </button>
+      </div>
 
       <div className="settings-section">
         <h3>Creator Profile</h3>
@@ -5174,6 +7112,13 @@ function SettingsScreen({
 
         .back-btn {
           margin-bottom: var(--spacing-lg);
+        }
+
+        .settings-header-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: var(--spacing-xl);
         }
 
         .settings-section {
