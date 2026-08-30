@@ -1,394 +1,97 @@
-/**
- * Authentication Service for Viral Blueprint
- * 
- * This service provides authentication functionality with clear labeling
- * for when the backend service is not connected.
- * 
- * SECURITY WARNING:
- * ⚠️  AWAITING BACKEND CONNECTION - This implementation is UI-only.
- * 
- * What this means:
- * - This is NOT secure authentication
- * - No passwords should be stored or validated here
- * - No real user sessions are created
- * - All "login" functionality is a demonstration of the interface
- * 
- * When connecting to a real backend:
- * 1. Replace all functions with actual API calls to your auth provider
- * 2. Use server-side authentication (OAuth, JWT, or session-based)
- * 3. Store tokens in httpOnly cookies, NOT localStorage
- * 4. Never handle passwords client-side
- * 5. Keep API keys server-side only
- * 
- * Recommended backend services:
- * - Firebase Auth
- * - Auth0
- * - Supabase Auth
- * - Clerk
- * - Custom Node.js backend with bcrypt + session/JWT
- */
-
 'use client';
 
-import {
-  UserAccount,
-  RegisterData,
-  LoginData,
-  PasswordResetRequest,
-  PasswordResetData,
-  AuthState,
-  AUTH_STORAGE_KEYS,
-  validateEmail,
-  validatePassword
-} from '@/types/auth';
+import { UserAccount, RegisterData, LoginData, PasswordResetRequest, PasswordResetData, AuthState, validateEmail, validatePassword } from '@/types/auth';
+import { supabase } from '@/services/supabaseClient';
 
-// Backend connection status
-export const AUTH_BACKEND_STATUS = {
-  CONNECTED: false, // Set to true when backend is connected
-  PROVIDER: null as string | null, // e.g., 'firebase', 'auth0', 'supabase'
-  LAST_CHECK: null as Date | null
-};
+export const AUTH_BACKEND_STATUS = { CONNECTED: true, PROVIDER: 'Supabase', LAST_CHECK: new Date() };
+export interface ValidationResult { isValid: boolean; errors: Record<string, string>; }
+type AccountUsage = { free_credits_total: number; free_credits_used: number };
 
-// Demo mode - when backend is not connected
-const DEMO_MODE = true;
-
-// Generate a demo user ID
-function generateDemoUserId(): string {
-  return `demo_user_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+function mapUser(user: { id: string; email?: string; created_at: string; last_sign_in_at?: string; email_confirmed_at?: string; user_metadata?: Record<string, unknown> }): UserAccount {
+  const name = typeof user.user_metadata?.full_name === 'string' ? user.user_metadata.full_name : (user.email?.split('@')[0] || 'Creator');
+  return { id: user.id, email: user.email || '', name, createdAt: new Date(user.created_at), emailVerified: Boolean(user.email_confirmed_at), lastLoginAt: user.last_sign_in_at ? new Date(user.last_sign_in_at) : null };
 }
 
-// Get current auth state from storage (UI state only)
-export function getAuthState(): AuthState {
-  if (typeof window === 'undefined') {
-    return { isAuthenticated: false, isLoading: false, user: null, error: null };
+export async function getAuthState(): Promise<AuthState> {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user) return { isAuthenticated: false, isLoading: false, user: null, error: null };
+  const { data: membership } = await supabase.from('viral_blueprint_accounts').select('user_id').eq('user_id', data.user.id).maybeSingle();
+  if (!membership) {
+    await supabase.auth.signOut();
+    return { isAuthenticated: false, isLoading: false, user: null, error: 'This account does not have Viral Blueprint access.' };
   }
-  
-  // Check if there's a stored auth token (demo mode)
-  const storedToken = localStorage.getItem(AUTH_STORAGE_KEYS.AUTH_TOKEN);
-  const storedEmail = localStorage.getItem(AUTH_STORAGE_KEYS.USER_EMAIL);
-  
-  if (storedToken && storedEmail && DEMO_MODE) {
-    // Demo mode - return a mock authenticated state
-    return {
-      isAuthenticated: true,
-      isLoading: false,
-      user: {
-        id: 'demo-user',
-        email: storedEmail,
-        name: storedEmail.split('@')[0],
-        createdAt: new Date(),
-        emailVerified: false,
-        lastLoginAt: new Date()
-      },
-      error: null
-    };
-  }
-  
-  return { isAuthenticated: false, isLoading: false, user: null, error: null };
-}
-
-// Validate registration data
-export interface ValidationResult {
-  isValid: boolean;
-  errors: Record<string, string>;
+  return { isAuthenticated: true, isLoading: false, user: mapUser(data.user), error: null };
 }
 
 export function validateRegistrationData(data: RegisterData): ValidationResult {
   const errors: Record<string, string> = {};
-  
-  // Name validation
-  if (!data.name.trim()) {
-    errors.name = 'Name is required';
-  } else if (data.name.trim().length < 2) {
-    errors.name = 'Name must be at least 2 characters';
-  }
-  
-  // Email validation
-  if (!data.email.trim()) {
-    errors.email = 'Email is required';
-  } else if (!validateEmail(data.email)) {
-    errors.email = 'Please enter a valid email address';
-  }
-  
-  // Password validation
-  const passwordValidation = validatePassword(data.password);
-  if (!passwordValidation.isValid) {
-    errors.password = passwordValidation.errors[0];
-  }
-  
-  // Confirm password
-  if (data.password !== data.confirmPassword) {
-    errors.confirmPassword = 'Passwords do not match';
-  }
-  
-  // Terms acceptance
-  if (!data.acceptTerms) {
-    errors.acceptTerms = 'You must accept the Terms of Service and Privacy Policy';
-  }
-  
-  return {
-    isValid: Object.keys(errors).length === 0,
-    errors
-  };
+  if (!data.name.trim()) errors.name = 'Name is required'; else if (data.name.trim().length < 2) errors.name = 'Name must be at least 2 characters';
+  if (!data.email.trim()) errors.email = 'Email is required'; else if (!validateEmail(data.email)) errors.email = 'Please enter a valid email address';
+  const passwordResult = validatePassword(data.password); if (!passwordResult.isValid) errors.password = passwordResult.errors[0];
+  if (data.password !== data.confirmPassword) errors.confirmPassword = 'Passwords do not match';
+  if (!data.acceptTerms) errors.acceptTerms = 'You must accept the Terms of Service and Privacy Policy';
+  return { isValid: Object.keys(errors).length === 0, errors };
 }
 
-// Validate login data
 export function validateLoginData(data: LoginData): ValidationResult {
   const errors: Record<string, string> = {};
-  
-  if (!data.email.trim()) {
-    errors.email = 'Email is required';
-  } else if (!validateEmail(data.email)) {
-    errors.email = 'Please enter a valid email address';
-  }
-  
-  if (!data.password) {
-    errors.password = 'Password is required';
-  }
-  
-  return {
-    isValid: Object.keys(errors).length === 0,
-    errors
-  };
+  if (!data.email.trim()) errors.email = 'Email is required'; else if (!validateEmail(data.email)) errors.email = 'Please enter a valid email address';
+  if (!data.password) errors.password = 'Password is required';
+  return { isValid: Object.keys(errors).length === 0, errors };
 }
 
-// Validate password reset data
 export function validatePasswordResetData(data: PasswordResetData): ValidationResult {
   const errors: Record<string, string> = {};
-  
-  if (!data.token) {
-    errors.token = 'Invalid reset token';
-  }
-  
-  const passwordValidation = validatePassword(data.newPassword);
-  if (!passwordValidation.isValid) {
-    errors.newPassword = passwordValidation.errors[0];
-  }
-  
-  if (data.newPassword !== data.confirmPassword) {
-    errors.confirmPassword = 'Passwords do not match';
-  }
-  
-  return {
-    isValid: Object.keys(errors).length === 0,
-    errors
-  };
+  const passwordResult = validatePassword(data.newPassword); if (!passwordResult.isValid) errors.newPassword = passwordResult.errors[0];
+  if (data.newPassword !== data.confirmPassword) errors.confirmPassword = 'Passwords do not match';
+  return { isValid: Object.keys(errors).length === 0, errors };
 }
 
-// Register new user
 export async function register(data: RegisterData): Promise<{ success: boolean; error?: string; user?: UserAccount }> {
-  // Validate data
   const validation = validateRegistrationData(data);
-  if (!validation.isValid) {
-    const firstError = Object.values(validation.errors)[0];
-    return { success: false, error: firstError };
-  }
-  
-  if (DEMO_MODE) {
-    // Demo mode - create mock user
-    const demoUser: UserAccount = {
-      id: generateDemoUserId(),
-      email: data.email,
-      name: data.name,
-      createdAt: new Date(),
-      emailVerified: false,
-      lastLoginAt: null
-    };
-    
-    // Store demo token (NOT SECURE - demonstration only)
-    localStorage.setItem(AUTH_STORAGE_KEYS.AUTH_TOKEN, `demo_token_${demoUser.id}`);
-    localStorage.setItem(AUTH_STORAGE_KEYS.USER_EMAIL, demoUser.email);
-    
-    return { success: true, user: demoUser };
-  }
-  
-  // Real backend connection would go here
-  // Example:
-  // const response = await fetch('/api/auth/register', {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify({ email: data.email, name: data.name })
-  // });
-  
-  return { 
-    success: false, 
-    error: 'Backend authentication not connected. Please deploy the backend service.' 
-  };
+  if (!validation.isValid) return { success: false, error: Object.values(validation.errors)[0] };
+  const { data: result, error } = await supabase.auth.signUp({ email: data.email.trim().toLowerCase(), password: data.password, options: { data: { full_name: data.name.trim(), app_id: 'viral-blueprint' }, emailRedirectTo: `${window.location.origin}/` } });
+  if (error) return { success: false, error: error.message };
+  if (!result.session || !result.user) return { success: false, error: 'Account created. Check your email to verify it, then log in.' };
+  return { success: true, user: mapUser(result.user) };
 }
 
-// Login user
 export async function login(data: LoginData): Promise<{ success: boolean; error?: string; user?: UserAccount }> {
-  // Validate data
   const validation = validateLoginData(data);
-  if (!validation.isValid) {
-    const firstError = Object.values(validation.errors)[0];
-    return { success: false, error: firstError };
-  }
-  
-  if (DEMO_MODE) {
-    // Demo mode - accept any valid email format with any password
-    const demoUser: UserAccount = {
-      id: generateDemoUserId(),
-      email: data.email,
-      name: data.email.split('@')[0],
-      createdAt: new Date(),
-      emailVerified: true,
-      lastLoginAt: new Date()
-    };
-    
-    // Store token if remember me is checked (NOT SECURE - demonstration only)
-    if (data.rememberMe) {
-      localStorage.setItem(AUTH_STORAGE_KEYS.AUTH_TOKEN, `demo_token_${demoUser.id}`);
-      localStorage.setItem(AUTH_STORAGE_KEYS.USER_EMAIL, demoUser.email);
-      localStorage.setItem(AUTH_STORAGE_KEYS.REMEMBER_ME, 'true');
-    } else {
-      sessionStorage.setItem(AUTH_STORAGE_KEYS.AUTH_TOKEN, `demo_token_${demoUser.id}`);
-      sessionStorage.setItem(AUTH_STORAGE_KEYS.USER_EMAIL, demoUser.email);
-    }
-    
-    return { success: true, user: demoUser };
-  }
-  
-  // Real backend connection would go here
-  // Example:
-  // const response = await fetch('/api/auth/login', {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify({ email: data.email, password: data.password })
-  // });
-  
-  return { 
-    success: false, 
-    error: 'Backend authentication not connected. Please deploy the backend service.' 
-  };
+  if (!validation.isValid) return { success: false, error: Object.values(validation.errors)[0] };
+  const { data: result, error } = await supabase.auth.signInWithPassword({ email: data.email.trim().toLowerCase(), password: data.password });
+  if (error || !result.user) return { success: false, error: error?.message || 'Login failed.' };
+  const { data: membership } = await supabase.from('viral_blueprint_accounts').select('user_id').eq('user_id', result.user.id).maybeSingle();
+  if (!membership) { await supabase.auth.signOut(); return { success: false, error: 'This account does not have Viral Blueprint access.' }; }
+  return { success: true, user: mapUser(result.user) };
 }
 
-// Logout user
-export async function logout(): Promise<{ success: boolean }> {
-  if (typeof window === 'undefined') {
-    return { success: false };
-  }
-  
-  // Clear all auth storage
-  localStorage.removeItem(AUTH_STORAGE_KEYS.AUTH_TOKEN);
-  localStorage.removeItem(AUTH_STORAGE_KEYS.USER_EMAIL);
-  localStorage.removeItem(AUTH_STORAGE_KEYS.REMEMBER_ME);
-  sessionStorage.removeItem(AUTH_STORAGE_KEYS.AUTH_TOKEN);
-  sessionStorage.removeItem(AUTH_STORAGE_KEYS.USER_EMAIL);
-  
-  return { success: true };
-}
+export async function logout(): Promise<{ success: boolean }> { const { error } = await supabase.auth.signOut(); return { success: !error }; }
 
-// Request password reset
 export async function requestPasswordReset(data: PasswordResetRequest): Promise<{ success: boolean; error?: string }> {
-  if (!validateEmail(data.email)) {
-    return { success: false, error: 'Please enter a valid email address' };
-  }
-  
-  if (DEMO_MODE) {
-    // Demo mode - store pending reset
-    localStorage.setItem(AUTH_STORAGE_KEYS.PENDING_RESET, data.email);
-    
-    // In production, this would send an actual email
-    console.log(`[DEMO] Password reset requested for: ${data.email}`);
-    console.log('[DEMO] In production, an email would be sent with a reset link.');
-    
-    return { success: true };
-  }
-  
-  // Real backend connection would go here
-  return { 
-    success: false, 
-    error: 'Backend authentication not connected. Please deploy the backend service.' 
-  };
+  if (!validateEmail(data.email)) return { success: false, error: 'Please enter a valid email address' };
+  const { error } = await supabase.auth.resetPasswordForEmail(data.email.trim().toLowerCase(), { redirectTo: `${window.location.origin}/` });
+  return error ? { success: false, error: error.message } : { success: true };
 }
 
-// Reset password with token
 export async function resetPassword(data: PasswordResetData): Promise<{ success: boolean; error?: string }> {
   const validation = validatePasswordResetData(data);
-  if (!validation.isValid) {
-    const firstError = Object.values(validation.errors)[0];
-    return { success: false, error: firstError };
-  }
-  
-  if (DEMO_MODE) {
-    // Demo mode - just clear the pending reset
-    localStorage.removeItem(AUTH_STORAGE_KEYS.PENDING_RESET);
-    
-    console.log(`[DEMO] Password reset completed with token: ${data.token}`);
-    console.log('[DEMO] In production, the token would be validated server-side.');
-    
-    return { success: true };
-  }
-  
-  // Real backend connection would go here
-  return { 
-    success: false, 
-    error: 'Backend authentication not connected. Please deploy the backend service.' 
-  };
+  if (!validation.isValid) return { success: false, error: Object.values(validation.errors)[0] };
+  const { error } = await supabase.auth.updateUser({ password: data.newPassword });
+  return error ? { success: false, error: error.message } : { success: true };
 }
 
-// Verify email (placeholder for when backend is connected)
-export async function verifyEmail(token: string): Promise<{ success: boolean; error?: string }> {
-  if (DEMO_MODE) {
-    console.log(`[DEMO] Email verification with token: ${token}`);
-    return { success: true };
-  }
-  
-  // Real backend connection would go here
-  return { 
-    success: false, 
-    error: 'Backend authentication not connected.' 
-  };
+export async function verifyEmail(): Promise<{ success: boolean; error?: string }> { const { data, error } = await supabase.auth.getUser(); return error || !data.user ? { success: false, error: error?.message || 'Email verification failed.' } : { success: true }; }
+export function hasPendingPasswordReset(): boolean { return false; }
+export function getPendingResetEmail(): string | null { return null; }
+export function clearPendingReset(): void {}
+export async function deleteAccount(_userId?: string): Promise<{ success: boolean; error?: string }> { return { success: false, error: 'Secure account deletion is being connected next.' }; }
+
+export async function getAccountRemainingAnalyses(): Promise<number> {
+  const { data, error } = await supabase.from('viral_blueprint_accounts').select('free_credits_total, free_credits_used').single<AccountUsage>();
+  if (error || !data) return 0;
+  return Math.max(0, data.free_credits_total - data.free_credits_used);
 }
 
-// Check if user has pending password reset
-export function hasPendingPasswordReset(): boolean {
-  if (typeof window === 'undefined') return false;
-  return localStorage.getItem(AUTH_STORAGE_KEYS.PENDING_RESET) !== null;
-}
-
-// Get pending reset email
-export function getPendingResetEmail(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem(AUTH_STORAGE_KEYS.PENDING_RESET);
-}
-
-// Clear pending reset
-export function clearPendingReset(): void {
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem(AUTH_STORAGE_KEYS.PENDING_RESET);
-}
-
-// Delete account (placeholder)
-export async function deleteAccount(userId: string): Promise<{ success: boolean; error?: string }> {
-  if (DEMO_MODE) {
-    console.log(`[DEMO] Account deletion requested for user: ${userId}`);
-    
-    // Clear all auth storage
-    await logout();
-    
-    // In production, this would:
-    // 1. Verify the user's identity
-    // 2. Delete all user data from the database
-    // 3. Delete any associated files or assets
-    // 4. Cancel any active subscriptions
-    // 5. Send a confirmation email
-    
-    return { success: true };
-  }
-  
-  // Real backend connection would go here
-  return { 
-    success: false, 
-    error: 'Backend authentication not connected.' 
-  };
-}
-
-// Export auth status for UI display
-export function getAuthStatusMessage(): string {
-  if (AUTH_BACKEND_STATUS.CONNECTED) {
-    return `Authenticated via ${AUTH_BACKEND_STATUS.PROVIDER}`;
-  }
-  return 'Authentication interface ready — backend connection pending';
-}
+export async function consumeAccountAnalysis(): Promise<boolean> { const { data, error } = await supabase.rpc('consume_viral_blueprint_credit'); return !error && data === true; }
+export function getAuthStatusMessage(): string { return 'Secure accounts powered by Supabase'; }
