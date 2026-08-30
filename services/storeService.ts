@@ -90,9 +90,14 @@ export function getProjects(): Project[] {
   if (stored) {
     try {
       const projects = JSON.parse(stored);
-      // Filter out expired projects
+      // Permanently remove expired projects so the seven-day policy is real,
+      // rather than only hiding expired records from the interface.
       const now = new Date();
-      return projects.filter((p: Project) => new Date(p.expiresAt) > now);
+      const activeProjects = projects.filter((p: Project) => new Date(p.expiresAt) > now);
+      if (activeProjects.length !== projects.length) {
+        localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(activeProjects));
+      }
+      return activeProjects;
     } catch {
       return [];
     }

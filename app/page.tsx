@@ -95,6 +95,31 @@ type MainScreen =
 
 type Screen = AuthScreen | MainScreen;
 
+const AUDIENCE_PRESETS = [
+  'Gen Z (ages 14–29)',
+  'Millennials (ages 30–45)',
+  'Gen X (ages 46–61)',
+  'Baby Boomers (ages 62–80)',
+  'All adults',
+];
+
+function AudiencePresetButtons({ onSelect }: { onSelect: (audience: string) => void }) {
+  return (
+    <div className="audience-presets" aria-label="Target audience shortcuts">
+      {AUDIENCE_PRESETS.map(audience => (
+        <button
+          key={audience}
+          type="button"
+          className="audience-preset"
+          onClick={() => onSelect(audience)}
+        >
+          {audience}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ============================================================================
 // AUTH SCREENS
 // ============================================================================
@@ -2217,9 +2242,6 @@ export default function App() {
     setState(prev => ({ ...prev, isProcessing: true, isDemoAnalysis: true }));
 
     try {
-      // Use one analysis from the free plan (only decrements once per submission)
-      useAnalysis();
-      
       // Generate title based on content type
       let title = input.content?.substring(0, 50) || '';
       if (input.uploadedFile) {
@@ -2244,6 +2266,10 @@ export default function App() {
 
       // Perform analysis (passes full input including uploadedFile and videoLink)
       const result = await analyzeContent(input);
+
+      // A credit is consumed only after a successful analysis. Failed or cancelled
+      // requests never reduce the user's remaining total.
+      useAnalysis();
       
       // Save analysis result
       const updatedProject = saveAnalysisResult(project.id, result);
@@ -3078,6 +3104,9 @@ function OnboardingScreen({
                 placeholder="e.g., Young adults 18-25 interested in fitness"
                 value={formData.targetAudience}
                 onChange={e => setFormData(prev => ({ ...prev, targetAudience: e.target.value }))}
+              />
+              <AudiencePresetButtons
+                onSelect={targetAudience => setFormData(prev => ({ ...prev, targetAudience }))}
               />
               {errors.targetAudience && <div className="form-error">{errors.targetAudience}</div>}
             </div>
@@ -4295,6 +4324,7 @@ function NewAnalysisScreen({
           value={targetAudience}
           onChange={e => setTargetAudience(e.target.value)}
         />
+        <AudiencePresetButtons onSelect={setTargetAudience} />
         <p className="text-sm text-muted mt-sm">
           {profile?.targetAudience ? `Default: ${profile.targetAudience}` : 'Enter your target audience'}
         </p>
@@ -7004,6 +7034,7 @@ function SettingsScreen({
             onChange={e => setTargetAudience(e.target.value)}
             placeholder="e.g., Young adults 18-25"
           />
+          <AudiencePresetButtons onSelect={setTargetAudience} />
         </div>
       </div>
 
