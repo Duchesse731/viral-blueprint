@@ -1,12 +1,12 @@
-Warning: truncated output (original token count: 53427)
-Total output lines: 7223
+Warning: truncated output (original token count: 53362)
+Total output lines: 7216
 
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { CreatorProfile, Project, FreePlan, Platform, ContentGoal, ContentTone, AnalysisInput, AnalysisResult, ContentType, Toast as ToastType, ScoreLabel, UploadedFile } from '@/types';
 import { UserAccount, RegisterData, LoginData, getPasswordStrengthScore } from '@/types/auth';
-import { FREE_ANALYSIS_LIMIT, getProfile, saveProfile, isOnboarded, getProjects, createProject, updateProject, deleteProject, duplicateProject, getProject, saveAnalysisResult, getRemainingAnalyses, useAnalysis, exportReport } from '@/services/storeService';
+import { FREE_ANALYSIS_LIMIT, getProfile, saveProfile, isOnboarded, getProjects, createProject, updateProject, deleteProject, duplicateProject, getProject, saveAnalysisResult, exportReport } from '@/services/storeService';
 import { 
   register as performRegister, 
   login as performLogin, 
@@ -16,7 +16,9 @@ import {
   getAuthStatusMessage,
   deleteAccount as performDeleteAccount,
   validateRegistrationData,
-  validateLoginData
+  validateLoginData,
+  getAccountRemainingAnalyses,
+  consumeAccountAnalysis
 } from '@/services/authService';
 import { analyzeContent, getScoreLabel, getScoreLabelText } from '@/services/analysisService';
 import { 
@@ -1141,10 +1143,6 @@ function ForgotPasswordScreen({ onBack, onLogin }: {
               We've sent a password reset link to <strong>{email}</strong>.
               Please check your inbox and click the link to reset your password.
             </p>
-            <p className="demo-note">
-              <Info size={16} />
-              Demo mode: In production, an actual email would be sent.
-            </p>
             <button className="btn btn-primary btn-lg full-width" onClick={onLogin}>
               <LogIn size={20} />
               Back to Log In
@@ -1463,10 +1461,6 @@ function ResetPasswordScreen({ onSuccess, onBack }: {
             <Check size={48} />
             <h3>Password Reset Complete</h3>
             <p>Your password has been successfully reset.</p>
-            <p className="demo-note">
-              <Info size={16} />
-              Demo mode: In production, your password would be updated securely.
-            </p>
             <button className="btn btn-primary btn-lg full-width" onClick={onSuccess}>
               <LogIn size={20} />
               Continue to Log In
@@ -2106,47 +2100,44 @@ export default function App() {
 
   // Load initial data and check auth state
   useEffect(() => {
-    const profile = getProfile();
-    const onboarded = isOnboarded();
-    const projects = getProjects();
-    const remaining = getRemainingAnalyses();
-    const authState = getAuthState();
+    void (async () => {
+      const profile = getProfile();
+      const onboarded = isOnboarded();
+      const projects = getProjects();
+      const authState = await getAuthState();
+      const remaining = authState.isAuthenticated ? await getAccountRemainingAnalyses() : 0;
 
-    if (authState.isAuthenticated && authState.user) {
-      // User is authenticated - go to home or stay at current screen
-      setState(prev => ({
+      setState(prev => authState.isAuthenticated && authState.user ? ({
         ...prev,
         user: authState.user,
         isAuthenticated: true,
         profile,
         projects,
         remainingAnalyses: remaining,
-        // If not authenticated, show welcome; otherwise check onboarding
         screen: prev.screen === 'welcome' ? (onboarded && profile ? 'home' : 'onboarding') : prev.screen
-      }));
-    } else {
-      // Not authenticated - show welcome screen
-      setState(prev => ({
+      }) : ({
         ...prev,
         user: null,
         isAuthenticated: false,
         profile,
         projects,
-        remainingAnalyses: remaining
+        remainingAnalyses: 0
       }));
-    }
+    })();
   }, []);
 
   // Handle user login
-  const handleLogin = useCallback((user: UserAccount) => {
+  const handleLogin = useCallback(async (user: UserAccount) => {
     const profile = getProfile();
     const onboarded = isOnboarded();
+    const remaining = await getAccountRemainingAnalyses();
     
     setState(prev => ({
       ...prev,
       user,
       isAuthenticated: true,
       profile,
+      remainingAnalyses: remaining,
       // Go to onboarding if not onboarded, otherwise go to home
       screen: onboarded && profile ? 'home' : 'onboarding'
     }));
@@ -2203,8 +2194,7 @@ export default function App() {
     setState(prev => ({
       ...prev,
       screen: 'home',
-      profile,
-      remainingAnalyses: getRemainingAnalyses()
+      profile
     }));
   }, []);
 
@@ -2272,14 +2262,17 @@ export default function App() {
 
       // A credit is consumed only after a successful analysis. Failed or cancelled
       // requests never reduce the user's remaining total.
-      useAnalysis();
+      const creditConsumed = await consumeAccountAnalysis();
+      if (!creditConsumed) {
+        throw new Error('No analysis credit was available.');
+      }
       
       // Save analysis result
       const updatedProject = saveAnalysisResult(project.id, result);
       
       // Update state
       const projects = getProjects();
-      const remaining = getRemainingAnalyses();
+      const remaining = await getAccountRemainingAnalyses();
       
       setState(prev => ({
         ...prev,
@@ -3336,7 +3329,15 @@ function DashboardScreen({
             <h3>Analyze My Content</h3>
             <p>Get a detailed analysis and improvement blueprint</p>
           </div>
-          <ChevronRight size={24} className="action-…3427 tokens truncated…      
+          <ChevronRight size={24} className="action-arrow" />
+        </button>
+
+        <button className="action-card" onClick={onCreateFromIdea}>
+          <div className="action-icon secondary">
+            <Zap size={28} />
+          </div>
+          <div className="action-content">
+            <h3>Create…3362 tokens truncated…      
         .file-upload-area:hover {
           border-color: var(--color-electric-purple);
           background: rgba(139, 92, 246, 0.05);
