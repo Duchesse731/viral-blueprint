@@ -101,7 +101,9 @@ export async function resetPassword(data: PasswordResetData): Promise<{ success:
   if (!validation.isValid) return { success: false, error: Object.values(validation.errors)[0] };
   const supabase = getSupabaseClient(); if (!supabase) return { success: false, error: configurationError() };
   const { error } = await supabase.auth.updateUser({ password: data.newPassword });
-  return error ? { success: false, error: error.message } : { success: true };
+  if (error) return { success: false, error: error.message };
+  await supabase.auth.signOut();
+  return { success: true };
 }
 
 export async function verifyEmail(): Promise<{ success: boolean; error?: string }> {
