@@ -10,9 +10,11 @@ const STORAGE_KEYS = {
   ONBOARDED: 'viral-blueprint-onboarded'
 };
 
-// Default free plan (3 analyses total)
+// Free users receive one successful analysis total.
+export const FREE_ANALYSIS_LIMIT = 1;
+
 const DEFAULT_FREE_PLAN: FreePlan = {
-  totalAnalyses: 3,
+  totalAnalyses: FREE_ANALYSIS_LIMIT,
   usedAnalyses: 0
 };
 
@@ -59,7 +61,19 @@ export function getFreePlan(): FreePlan {
   const stored = localStorage.getItem(STORAGE_KEYS.FREE_PLAN);
   if (stored) {
     try {
-      return JSON.parse(stored);
+      const parsed = JSON.parse(stored) as FreePlan;
+      // Migrate older demo data that granted three free analyses.
+      const normalizedPlan: FreePlan = {
+        totalAnalyses: FREE_ANALYSIS_LIMIT,
+        usedAnalyses: Math.min(parsed.usedAnalyses ?? 0, FREE_ANALYSIS_LIMIT)
+      };
+      if (
+        parsed.totalAnalyses !== normalizedPlan.totalAnalyses ||
+        parsed.usedAnalyses !== normalizedPlan.usedAnalyses
+      ) {
+        localStorage.setItem(STORAGE_KEYS.FREE_PLAN, JSON.stringify(normalizedPlan));
+      }
+      return normalizedPlan;
     } catch {
       return DEFAULT_FREE_PLAN;
     }
