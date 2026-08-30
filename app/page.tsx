@@ -19,6 +19,7 @@ import {
   consumeAccountAnalysis
 } from '@/services/authService';
 import { analyzeContent, getScoreLabel, getScoreLabelText } from '@/services/analysisService';
+import { getSupabaseClient } from '@/services/supabaseClient';
 import { 
   processUpload, 
   validateVideoUrl, 
@@ -2115,6 +2116,20 @@ export default function App() {
         screen: prev.screen === 'welcome' ? (onboarded && profile ? 'home' : 'onboarding') : prev.screen,
       }) : ({ ...prev, user: null, isAuthenticated: false, profile, projects, remainingAnalyses: 0 }));
     })();
+  }, []);
+
+  // Send password-recovery links to the real new-password form.
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    const { data: listener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setState(prev => ({ ...prev, screen: 'reset-password' }));
+      }
+    });
+
+    return () => listener.subscription.unsubscribe();
   }, []);
 
   // Handle user login
