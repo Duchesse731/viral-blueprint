@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
   },
   "keywords": [
     "content",
@@ -27,6 +28,8 @@
   "devDependencies": {
     "@types/node": "^26.1.2",
     "@types/react": "^19.2.18",
-    "typescript": "^7.0.2"
+    "jsdom": "26.1.0",
+    "typescript": "^7.0.2",
+    "vitest": "3.2.7"
   }
 }

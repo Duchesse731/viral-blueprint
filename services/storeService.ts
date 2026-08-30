@@ -10,11 +10,9 @@ const STORAGE_KEYS = {
   ONBOARDED: 'viral-blueprint-onboarded'
 };
 
-// Free users receive one successful analysis total.
-export const FREE_ANALYSIS_LIMIT = 1;
-
+// Local compatibility value; authenticated credit accounting is enforced by Supabase.
 const DEFAULT_FREE_PLAN: FreePlan = {
-  totalAnalyses: FREE_ANALYSIS_LIMIT,
+  totalAnalyses: 1,
   usedAnalyses: 0
 };
 
@@ -61,19 +59,7 @@ export function getFreePlan(): FreePlan {
   const stored = localStorage.getItem(STORAGE_KEYS.FREE_PLAN);
   if (stored) {
     try {
-      const parsed = JSON.parse(stored) as FreePlan;
-      // Migrate older demo data that granted three free analyses.
-      const normalizedPlan: FreePlan = {
-        totalAnalyses: FREE_ANALYSIS_LIMIT,
-        usedAnalyses: Math.min(parsed.usedAnalyses ?? 0, FREE_ANALYSIS_LIMIT)
-      };
-      if (
-        parsed.totalAnalyses !== normalizedPlan.totalAnalyses ||
-        parsed.usedAnalyses !== normalizedPlan.usedAnalyses
-      ) {
-        localStorage.setItem(STORAGE_KEYS.FREE_PLAN, JSON.stringify(normalizedPlan));
-      }
-      return normalizedPlan;
+      return JSON.parse(stored);
     } catch {
       return DEFAULT_FREE_PLAN;
     }

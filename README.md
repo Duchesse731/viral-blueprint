@@ -46,7 +46,8 @@ A premium, responsive web application for content creators to evaluate and impro
 - **Styling**: CSS with CSS Variables (custom design system)
 - **Icons**: Lucide React + Custom SVG icons
 - **State Management**: React hooks (useState, useEffect, useCallback)
-- **Storage**: LocalStorage for persistence
+- **Authentication and Credits**: Supabase Auth with atomic server-side credit accounting
+- **Project Storage**: LocalStorage with seven-day retention
 
 ### Project Structure
 ```
@@ -57,7 +58,10 @@ A premium, responsive web application for content creators to evaluate and impro
 │   └── page.tsx            # Main application component
 ├── services/
 │   ├── analysisService.ts  # Scoring and recommendation engine
+│   ├── authService.ts      # Supabase authentication and credit calls
+│   ├── supabaseClient.ts   # Browser client configuration
 │   └── storeService.ts     # LocalStorage persistence
+├── supabase/migrations/    # Versioned database schema and policies
 ├── types/
 │   └── index.ts            # TypeScript type definitions
 ├── next.config.js          # Next.js configuration
@@ -101,7 +105,7 @@ npm start
 ```
 
 ### Environment
-The application runs entirely on the client-side and does not require any environment variables for basic functionality.
+Copy `.env.example` to `.env.local` and set the Zenori Backend project URL and publishable key. Never use a Supabase secret or service-role key in a `NEXT_PUBLIC_` variable.
 
 ## Screens
 
@@ -247,7 +251,7 @@ The following features cannot operate until external services are configured:
 | Feature | Status | Requirements |
 |---------|--------|--------------|
 | AI Analysis | Demo Mode | Connect to OpenAI, Anthropic, or other AI provider |
-| Authentication | Not Implemented | Implement auth service (Auth0, Firebase, etc.) |
+| Authentication | Connected | Supabase Auth through Zenori Backend |
 | Payment Processing | Placeholder | Connect Stripe or payment provider |
 | Cloud Storage | LocalStorage | Connect cloud database for multi-device sync |
 | Email Notifications | Client-side only | Connect email service (SendGrid, etc.) |
@@ -255,8 +259,9 @@ The following features cannot operate until external services are configured:
 
 ## Data & Privacy
 
-- **LocalStorage Only**: All data is stored in browser localStorage
-- **7-Day Expiration**: Generated assets auto-delete after 7 days
+- **Local Project Storage**: Project records remain in the current browser
+- **7-Day Expiration**: Expired local project records are permanently removed when the app loads them
+- **Server-Enforced Credits**: Free-credit balances cannot be reset from LocalStorage
 - **No API Keys Exposed**: Credentials kept server-side when implemented
 - **Export Available**: Users can export their data anytime
 
