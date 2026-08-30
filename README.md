@@ -186,7 +186,7 @@ The application runs entirely on the client-side and does not require any enviro
 - Delete with confirmation
 
 ### 13. Plans
-- Free plan (3 analyses total)
+- Free plan (1 successful analysis total)
 - Pro plan placeholder ($39.99-$49.99/month)
 - Clear feature comparison
 - Checkout placeholder
