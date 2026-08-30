@@ -1,17 +1,15 @@
-Warning: truncated output (original token count: 53362)
-Total output lines: 7216
-
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { CreatorProfile, Project, FreePlan, Platform, ContentGoal, ContentTone, AnalysisInput, AnalysisResult, ContentType, Toast as ToastType, ScoreLabel, UploadedFile } from '@/types';
 import { UserAccount, RegisterData, LoginData, getPasswordStrengthScore } from '@/types/auth';
-import { FREE_ANALYSIS_LIMIT, getProfile, saveProfile, isOnboarded, getProjects, createProject, updateProject, deleteProject, duplicateProject, getProject, saveAnalysisResult, exportReport } from '@/services/storeService';
+import { getProfile, saveProfile, isOnboarded, getProjects, createProject, updateProject, deleteProject, duplicateProject, getProject, saveAnalysisResult, exportReport } from '@/services/storeService';
 import { 
   register as performRegister, 
   login as performLogin, 
   logout as performLogout,
   requestPasswordReset,
+  resetPassword,
   getAuthState,
   getAuthStatusMessage,
   deleteAccount as performDeleteAccount,
@@ -1143,6 +1141,10 @@ function ForgotPasswordScreen({ onBack, onLogin }: {
               We've sent a password reset link to <strong>{email}</strong>.
               Please check your inbox and click the link to reset your password.
             </p>
+            <p className="demo-note">
+              <Info size={16} />
+              Demo mode: In production, an actual email would be sent.
+            </p>
             <button className="btn btn-primary btn-lg full-width" onClick={onLogin}>
               <LogIn size={20} />
               Back to Log In
@@ -1396,9 +1398,6 @@ function ResetPasswordScreen({ onSuccess, onBack }: {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
 
-  // In a real app, this would come from the URL
-  const resetToken = 'demo-token';
-
   const passwordStrength = getPasswordStrengthScore(newPassword);
 
   const getStrengthColor = () => {
@@ -1429,10 +1428,9 @@ function ResetPasswordScreen({ onSuccess, onBack }: {
     setIsLoading(true);
 
     try {
-      const result = await requestPasswordReset({ email: '' });
-      
-      // In demo mode, just show success
-      setIsSuccess(true);
+      const result = await resetPassword({ token: '', newPassword, confirmPassword });
+      if (result.success) setIsSuccess(true);
+      else setError(result.error || 'Password reset failed. Please request a new reset link.');
     } catch {
       setError('An unexpected error occurred');
     } finally {
@@ -1461,6 +1459,10 @@ function ResetPasswordScreen({ onSuccess, onBack }: {
             <Check size={48} />
             <h3>Password Reset Complete</h3>
             <p>Your password has been successfully reset.</p>
+            <p className="demo-note">
+              <Info size={16} />
+              Demo mode: In production, your password would be updated securely.
+            </p>
             <button className="btn btn-primary btn-lg full-width" onClick={onSuccess}>
               <LogIn size={20} />
               Continue to Log In
@@ -2083,6 +2085,7 @@ const CONTENT_TYPE_LABELS: Record<ContentType, string> = {
 };
 
 export default function App() {
+  const analysisCancelledRef = useRef(false);
   const [state, setState] = useState<AppState>({
     screen: 'welcome',
     user: null,
@@ -2106,23 +2109,11 @@ export default function App() {
       const projects = getProjects();
       const authState = await getAuthState();
       const remaining = authState.isAuthenticated ? await getAccountRemainingAnalyses() : 0;
-
       setState(prev => authState.isAuthenticated && authState.user ? ({
-        ...prev,
-        user: authState.user,
-        isAuthenticated: true,
-        profile,
-        projects,
+        ...prev, user: authState.user, isAuthenticated: true, profile, projects,
         remainingAnalyses: remaining,
-        screen: prev.screen === 'welcome' ? (onboarded && profile ? 'home' : 'onboarding') : prev.screen
-      }) : ({
-        ...prev,
-        user: null,
-        isAuthenticated: false,
-        profile,
-        projects,
-        remainingAnalyses: 0
-      }));
+        screen: prev.screen === 'welcome' ? (onboarded && profile ? 'home' : 'onboarding') : prev.screen,
+      }) : ({ ...prev, user: null, isAuthenticated: false, profile, projects, remainingAnalyses: 0 }));
     })();
   }, []);
 
@@ -2130,14 +2121,14 @@ export default function App() {
   const handleLogin = useCallback(async (user: UserAccount) => {
     const profile = getProfile();
     const onboarded = isOnboarded();
-    const remaining = await getAccountRemainingAnalyses();
+    const remainingAnalyses = await getAccountRemainingAnalyses();
     
     setState(prev => ({
       ...prev,
       user,
       isAuthenticated: true,
       profile,
-      remainingAnalyses: remaining,
+      remainingAnalyses,
       // Go to onboarding if not onboarded, otherwise go to home
       screen: onboarded && profile ? 'home' : 'onboarding'
     }));
@@ -2159,16 +2150,15 @@ export default function App() {
   // Handle account deletion
   const handleDeleteAccount = useCallback(async () => {
     if (state.user) {
-      await performDeleteAccount(state.user.id);
-      
-      setState(prev => ({
-        ...prev,
-        user: null,
-        isAuthenticated: false,
-        profile: null,
-        projects: [],
-        screen: 'welcome'
-      }));
+      const result = await performDeleteAccount();
+      if (!result.success) {
+        setState(prev => ({ ...prev, toast: {
+          id: Date.now().toString(),
+          message: result.error || 'Account deletion could not be completed.',
+          type: 'error',
+        } }));
+        return;
+      }
     }
   }, [state.user]);
 
@@ -2210,7 +2200,8 @@ export default function App() {
 
   // Start new analysis
   const handleStartAnalysis = useCallback((input: Partial<AnalysisInput>) => {
-    setState(prev => ({ ...prev, analysisInput: input }));
+    analysisCancelledRef.current = false;
+    setState(prev => ({ ...prev, analysisInput: input, isProcessing: true }));
     navigate('analysis-progress');
   }, [navigate]);
 
@@ -2234,6 +2225,7 @@ export default function App() {
 
     setState(prev => ({ ...prev, isProcessing: true, isDemoAnalysis: true }));
 
+    let projectId: string | null = null;
     try {
       // Generate title based on content type
       let title = input.content?.substring(0, 50) || '';
@@ -2256,16 +2248,18 @@ export default function App() {
         tone: input.tone || 'casual',
         targetAudience: input.targetAudience || state.profile?.targetAudience || ''
       });
+      projectId = project.id;
 
       // Perform analysis (passes full input including uploadedFile and videoLink)
       const result = await analyzeContent(input);
 
-      // A credit is consumed only after a successful analysis. Failed or cancelled
-      // requests never reduce the user's remaining total.
-      const creditConsumed = await consumeAccountAnalysis();
-      if (!creditConsumed) {
-        throw new Error('No analysis credit was available.');
+      if (analysisCancelledRef.current) {
+        deleteProject(project.id);
+        return;
       }
+
+      const creditConsumed = await consumeAccountAnalysis();
+      if (!creditConsumed) throw new Error('No analysis credit was available.');
       
       // Save analysis result
       const updatedProject = saveAnalysisResult(project.id, result);
@@ -2283,6 +2277,7 @@ export default function App() {
         isProcessing: false
       }));
     } catch {
+      if (projectId) deleteProject(projectId);
       showToast('Analysis failed. Please try again.', 'error');
       setState(prev => ({ ...prev, isProcessing: false, isDemoAnalysis: false }));
     }
@@ -2290,6 +2285,8 @@ export default function App() {
 
   // Cancel analysis
   const handleCancelAnalysis = useCallback(() => {
+    analysisCancelledRef.current = true;
+    setState(prev => ({ ...prev, isProcessing: false, isDemoAnalysis: false, analysisInput: {} }));
     navigate('home');
   }, [navigate]);
 
@@ -3337,7 +3334,473 @@ function DashboardScreen({
             <Zap size={28} />
           </div>
           <div className="action-content">
-            <h3>Create…3362 tokens truncated…      
+            <h3>Create From an Idea</h3>
+            <p>Turn your rough idea into optimized content</p>
+          </div>
+          <ChevronRight size={24} className="action-arrow" />
+        </button>
+      </div>
+
+      <div className="dashboard-stats">
+        <div className="stat-card">
+          <div className="stat-icon">
+            <Target size={24} />
+          </div>
+          <div className="stat-content">
+            <div className="stat-value">{remainingAnalyses}</div>
+            <div className="stat-label">Free Analyses Remaining</div>
+          </div>
+        </div>
+
+        {bestScore !== null && bestScore > 0 && (
+          <div className="stat-card">
+            <div className="stat-icon cyan">
+              <TrendingUp size={24} />
+            </div>
+            <div className="stat-content">
+              <div className="stat-value text-cyan">{bestScore}</div>
+              <div className="stat-label">Best Viral Score</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {projects.length > 0 && (
+        <section className="dashboard-section">
+          <div className="section-header">
+            <h2>Recent Projects</h2>
+            <button className="btn btn-ghost" onClick={() => onNavigate('projects')}>
+              View All
+              <ChevronRight size={18} />
+            </button>
+          </div>
+
+          <div className="projects-list">
+            {recentProjects.map(project => (
+              <ProjectCard 
+                key={project.id} 
+                project={project} 
+                onClick={() => onOpenProject(project.id)}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="expiration-notice">
+        <Clock size={18} />
+        <span>
+          Creative assets are automatically deleted after 7 days. 
+          Download your content before expiration.
+        </span>
+      </div>
+
+      <style jsx>{`
+        .dashboard-screen {
+          max-width: 900px;
+          margin: 0 auto;
+        }
+
+        .dashboard-header {
+          margin-bottom: var(--spacing-xl);
+        }
+
+        .dashboard-actions {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-md);
+          margin-bottom: var(--spacing-xl);
+        }
+
+        .action-card {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-lg);
+          padding: var(--spacing-lg);
+          background: var(--color-gray-800);
+          border: 1px solid var(--color-gray-700);
+          border-radius: var(--radius-lg);
+          cursor: pointer;
+          transition: all var(--transition-fast);
+          text-align: left;
+          width: 100%;
+        }
+
+        .action-card:hover {
+          border-color: var(--color-electric-purple);
+          transform: translateX(4px);
+        }
+
+        .action-card.primary {
+          background: linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(139, 92, 246, 0.05) 100%);
+          border-color: rgba(139, 92, 246, 0.3);
+        }
+
+        .action-icon {
+          width: 56px;
+          height: 56px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: var(--color-electric-purple);
+          border-radius: var(--radius-md);
+          color: var(--color-white);
+        }
+
+        .action-icon.secondary {
+          background: var(--color-gray-700);
+        }
+
+        .action-content {
+          flex: 1;
+        }
+
+        .action-content h3 {
+          font-size: var(--font-size-lg);
+          margin-bottom: var(--spacing-xs);
+          color: var(--color-white);
+        }
+
+        .action-content p {
+          font-size: var(--font-size-sm);
+          color: var(--color-gray-400);
+        }
+
+        .action-arrow {
+          color: var(--color-gray-400);
+          transition: color var(--transition-fast), transform var(--transition-fast);
+        }
+
+        .action-card:hover .action-arrow {
+          color: var(--color-bright-cyan);
+          transform: translateX(4px);
+        }
+
+        .dashboard-stats {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: var(--spacing-md);
+          margin-bottom: var(--spacing-xl);
+        }
+
+        .stat-card {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-md);
+          padding: var(--spacing-lg);
+          background: var(--color-gray-800);
+          border-radius: var(--radius-lg);
+          border: 1px solid var(--color-gray-700);
+        }
+
+        .stat-icon {
+          width: 48px;
+          height: 48px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(139, 92, 246, 0.2);
+          border-radius: var(--radius-md);
+          color: var(--color-electric-purple-light);
+        }
+
+        .stat-icon.cyan {
+          background: rgba(6, 182, 212, 0.2);
+          color: var(--color-bright-cyan);
+        }
+
+        .stat-value {
+          font-size: var(--font-size-2xl);
+          font-weight: 700;
+        }
+
+        .stat-label {
+          font-size: var(--font-size-sm);
+          color: var(--color-gray-400);
+        }
+
+        .dashboard-section {
+          margin-bottom: var(--spacing-xl);
+        }
+
+        .section-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: var(--spacing-lg);
+        }
+
+        .projects-list {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-md);
+        }
+
+        .expiration-notice {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-md);
+          padding: var(--spacing-md);
+          background: rgba(245, 158, 11, 0.1);
+          border: 1px solid rgba(245, 158, 11, 0.2);
+          border-radius: var(--radius-md);
+          color: var(--color-warning-light);
+          font-size: var(--font-size-sm);
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// Project Card
+function ProjectCard({ project, onClick }: { project: Project; onClick: () => void }) {
+  const daysUntilExpiration = Math.ceil((new Date(project.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+  const isExpiringSoon = daysUntilExpiration <= 2;
+
+  return (
+    <button className="project-card" onClick={onClick}>
+      <div className="project-info">
+        <h4>{project.title}</h4>
+        <div className="project-meta">
+          <span className="chip">{PLATFORM_LABELS[project.targetPlatform]}</span>
+          <span className="text-sm text-muted">
+            {new Date(project.createdAt).toLocaleDateString()}
+          </span>
+        </div>
+      </div>
+      <div className="project-score">
+        {project.analysisResult ? (
+          <div className="score-badge" data-score={project.analysisResult.overallScore >= 70 ? 'high' : 'low'}>
+            {project.analysisResult.overallScore}
+          </div>
+        ) : (
+          <span className="badge badge-warning">Pending</span>
+        )}
+      </div>
+      {isExpiringSoon && (
+        <div className="expiration-badge">
+          <Clock size={14} />
+          {daysUntilExpiration} days
+        </div>
+      )}
+    </button>
+  );
+}
+
+// File Upload Component
+function FileUpload({
+  contentType,
+  file,
+  onFileSelect,
+  onFileRemove,
+  error
+}: {
+  contentType: ContentType;
+  file: UploadedFile | null;
+  onFileSelect: (file: UploadedFile) => void;
+  onFileRemove: () => void;
+  error?: string;
+}) {
+  const [isDragging, setIsDragging] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  
+  const allowedTypes = getAllowedTypesForContentType(contentType);
+  const maxSize = getMaxFileSize(contentType);
+  const maxSizeFormatted = formatFileSize(maxSize);
+  
+  const getAcceptedTypes = () => {
+    switch (contentType) {
+      case 'image':
+        return '.jpg,.jpeg,.png,.webp';
+      case 'video':
+        return '.mp4,.mov,.webm';
+      case 'script':
+        return '.txt,.pdf,.docx';
+      case 'transcript':
+        return '.txt,.pdf,.docx,.srt,.vtt';
+      default:
+        return '';
+    }
+  };
+  
+  const getPlaceholderText = () => {
+    switch (contentType) {
+      case 'image':
+        return 'Drag & drop an image here, or click to select\n\nSupports: JPG, JPEG, PNG, WebP';
+      case 'video':
+        return 'Drag & drop a video here, or click to select\n\nSupports: MP4, MOV, WebM';
+      case 'script':
+        return 'Upload a script file or paste text below\n\nSupports: TXT, PDF, DOCX';
+      case 'transcript':
+        return 'Upload a transcript file or paste text below\n\nSupports: TXT, PDF, DOCX, SRT, VTT';
+      default:
+        return '';
+    }
+  };
+  
+  const handleFile = async (selectedFile: File) => {
+    setLocalError(null);
+    
+    try {
+      const processedFile = await processUpload(selectedFile, contentType);
+      onFileSelect(processedFile);
+    } catch (err) {
+      setLocalError((err as Error).message);
+    }
+  };
+  
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    const droppedFile = e.dataTransfer.files[0];
+    if (droppedFile) {
+      handleFile(droppedFile);
+    }
+  }, [contentType]);
+  
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+  
+  const handleDragLeave = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+  
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      handleFile(selectedFile);
+    }
+  };
+  
+  const handleClick = () => {
+    inputRef.current?.click();
+  };
+  
+  const handleReplace = () => {
+    onFileRemove();
+    setTimeout(() => inputRef.current?.click(), 0);
+  };
+  
+  const displayError = error || localError;
+  
+  // Show file preview when file is uploaded
+  if (file) {
+    return (
+      <div className="file-preview-container">
+        <div className="file-preview-card">
+          {file.type === 'image' && file.dataUrl && (
+            <div className="file-image-preview">
+              <img src={file.dataUrl} alt={file.name} />
+            </div>
+          )}
+          
+          {file.type === 'video' && (
+            <div className="file-video-preview">
+              <Video size={48} />
+              <video controls={false} style={{ display: 'none' }}>
+                <source src={file.dataUrl} type={file.mimeType} />
+              </video>
+            </div>
+          )}
+          
+          {file.type === 'document' && (
+            <div className="file-document-preview">
+              <FileText size={48} />
+            </div>
+          )}
+          
+          <div className="file-info">
+            <div className="file-name">{file.name}</div>
+            <div className="file-meta">
+              <span className="file-size">{formatFileSize(file.size)}</span>
+              <span className="file-expiry">
+                <Clock size={14} />
+                Expires: {formatExpirationDate(file.expiresAt)}
+              </span>
+            </div>
+          </div>
+          
+          <div className="file-actions">
+            <button className="btn btn-ghost btn-sm" onClick={handleReplace}>
+              <RefreshCw size={16} />
+              Replace
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={onFileRemove}>
+              <Trash2 size={16} />
+              Remove
+            </button>
+          </div>
+        </div>
+        
+        <input
+          ref={inputRef}
+          type="file"
+          accept={getAcceptedTypes()}
+          onChange={handleInputChange}
+          style={{ display: 'none' }}
+        />
+      </div>
+    );
+  }
+  
+  return (
+    <div className="file-upload-container">
+      <div
+        className={`file-upload-area ${isDragging ? 'dragging' : ''} ${displayError ? 'error' : ''}`}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onClick={handleClick}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept={getAcceptedTypes()}
+          onChange={handleInputChange}
+          style={{ display: 'none' }}
+        />
+        
+        <div className="upload-icon">
+          {contentType === 'image' ? <Camera size={48} /> : 
+           contentType === 'video' ? <Video size={48} /> : 
+           <Upload size={48} />}
+        </div>
+        
+        <div className="upload-text">
+          {getPlaceholderText().split('\n').map((line, i) => (
+            <p key={i}>{line}</p>
+          ))}
+        </div>
+        
+        <p className="upload-hint">Max file size: {maxSizeFormatted}</p>
+      </div>
+      
+      {displayError && (
+        <div className="file-upload-error">
+          <AlertTriangle size={16} />
+          {displayError}
+        </div>
+      )}
+      
+      <style jsx>{`
+        .file-upload-container {
+          width: 100%;
+        }
+        
+        .file-upload-area {
+          border: 2px dashed var(--color-gray-600);
+          border-radius: var(--radius-lg);
+          padding: var(--spacing-xl);
+          text-align: center;
+          cursor: pointer;
+          transition: all var(--transition-fast);
+          background: var(--color-gray-800);
+        }
+        
         .file-upload-area:hover {
           border-color: var(--color-electric-purple);
           background: rgba(139, 92, 246, 0.05);
@@ -6230,14 +6693,12 @@ function PlansScreen({
       <div className="usage-card">
         <div className="usage-info">
           <span className="usage-label">Your Current Usage</span>
-          <span className="usage-value">
-            {FREE_ANALYSIS_LIMIT - remainingAnalyses} of {FREE_ANALYSIS_LIMIT} analysis used
-          </span>
+          <span className="usage-value">{1 - remainingAnalyses} of 1 analysis used</span>
         </div>
         <div className="progress-bar" style={{ maxWidth: '200px' }}>
           <div 
             className="progress-bar-fill" 
-            style={{ width: `${((FREE_ANALYSIS_LIMIT - remainingAnalyses) / FREE_ANALYSIS_LIMIT) * 100}%` }} 
+            style={{ width: `${(1 - remainingAnalyses) * 100}%` }}
           />
         </div>
       </div>
@@ -6252,7 +6713,7 @@ function PlansScreen({
             </div>
           </div>
           <ul className="plan-features">
-            <li><Check size={16} /> 1 content analysis total</li>
+            <li><Check size={16} /> 1 successful content analysis total</li>
             <li><Check size={16} /> Basic scoring categories</li>
             <li><Check size={16} /> Improvement blueprints</li>
             <li><Check size={16} /> Script Studio access</li>

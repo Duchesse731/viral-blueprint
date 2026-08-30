@@ -437,7 +437,8 @@ function generateCategoryDetails(
 function generateRecommendations(
   scores: Record<string, number>,
   platform: Platform,
-  goal: ContentGoal
+  goal: ContentGoal,
+  targetAudience: string
 ): {
   strengths: string[];
   weaknesses: string[];
@@ -478,6 +479,13 @@ function generateRecommendations(
     strengths.push('Content speaks directly to the target audience');
   } else {
     corrections.push('Use more second-person language and address audience directly');
+  }
+
+  const normalizedAudience = targetAudience.toLowerCase();
+  if (normalizedAudience.includes('gen x')) {
+    corrections.push('For Gen X, lead with practical value, direct language, and culturally familiar references without stereotypes');
+  } else if (targetAudience.trim()) {
+    corrections.push(`Make the opening example explicitly relevant to ${targetAudience.trim()}`);
   }
   
   // Generate improved hooks
@@ -600,7 +608,7 @@ export async function analyzeContent(input: AnalysisInput): Promise<AnalysisResu
   const categoryScores = generateCategoryDetails(weightedScores, targetPlatform, goal);
   
   // Generate recommendations
-  const recommendations = generateRecommendations(weightedScores, targetPlatform, goal);
+  const recommendations = generateRecommendations(weightedScores, targetPlatform, goal, input.targetAudience || '');
   
   // Calculate expiration (7 days from now)
   const now = new Date();
