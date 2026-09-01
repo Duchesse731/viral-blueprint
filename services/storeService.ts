@@ -18,7 +18,9 @@ const DEFAULT_FREE_PLAN: FreePlan = {
 
 // Generate unique ID
 function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  // Database-backed projects require UUID identifiers. Modern supported browsers
+  // provide this native, collision-safe generator.
+  return crypto.randomUUID();
 }
 
 // Calculate expiration date (7 days from now)
@@ -108,6 +110,14 @@ export function getProjects(): Project[] {
 export function getProject(id: string): Project | null {
   const projects = getProjects();
   return projects.find(p => p.id === id) || null;
+}
+
+// Keep the familiar local cache for fast rendering while the secure cloud
+// workspace remains the signed-in source of truth.
+export function replaceProjects(projects: Project[]): void {
+  if (typeof window === 'undefined') return;
+  const activeProjects = projects.filter(p => new Date(p.expiresAt) > new Date());
+  localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(activeProjects));
 }
 
 export function createProject(data: {
