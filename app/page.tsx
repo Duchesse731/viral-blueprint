@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { CreatorProfile, Project, FreePlan, Platform, ContentGoal, ContentTone, AnalysisInput, AnalysisResult, ContentType, Toast as ToastType, ScoreLabel, UploadedFile } from '@/types';
 import { UserAccount, RegisterData, LoginData, getPasswordStrengthScore } from '@/types/auth';
-import { getProfile, saveProfile, isOnboarded, getProjects, createProject, updateProject, deleteProject, duplicateProject, getProject, saveAnalysisResult, exportReport } from '@/services/storeService';
+import { getProfile, saveProfile, isOnboarded, getProjects, createProject, updateProject, deleteProject, duplicateProject, getProject, saveAnalysisResult, exportReport, replaceProjects } from '@/services/storeService';
 import { 
   register as performRegister, 
   login as performLogin, 
@@ -20,6 +20,7 @@ import {
 } from '@/services/authService';
 import { analyzeContent, getScoreLabel, getScoreLabelText } from '@/services/analysisService';
 import { getSupabaseClient } from '@/services/supabaseClient';
+import { loadCloudProjects, saveCloudProject, removeCloudProject } from '@/services/cloudProjectService';
 import { 
   processUpload, 
   validateVideoUrl, 
@@ -2107,8 +2108,11 @@ export default function App() {
     void (async () => {
       const profile = getProfile();
       const onboarded = isOnboarded();
-      const projects = getProjects();
+      const localProjects = getProjects();
       const authState = await getAuthState();
+      const cloudProjects = authState.isAuthenticated ? await loadCloudProjects() : null;
+      const projects = cloudProjects ?? localProjects;
+      if (cloudProjects) replaceProjects(cloudProjects);
       const remaining = authState.isAuthenticated ? await getAccountRemainingAnalyses() : 0;
       setState(prev => authState.isAuthenticated && authState.user ? ({
         ...prev, user: authState.user, isAuthenticated: true, profile, projects,
@@ -2264,12 +2268,15 @@ export default function App() {
         targetAudience: input.targetAudience || state.profile?.targetAudience || ''
       });
       projectId = project.id;
+      // Save immediately so an in-progress analysis is never trapped on one device.
+      void saveCloudProject(project);
 
       // Perform analysis (passes full input including uploadedFile and videoLink)
       const result = await analyzeContent(input);
 
       if (analysisCancelledRef.current) {
         deleteProject(project.id);
+        void removeCloudProject(project.id);
         return;
       }
 
@@ -2278,6 +2285,7 @@ export default function App() {
       
       // Save analysis result
       const updatedProject = saveAnalysisResult(project.id, result);
+      if (updatedProject) void saveCloudProject(updatedProject);
       
       // Update state
       const projects = getProjects();
@@ -2292,7 +2300,10 @@ export default function App() {
         isProcessing: false
       }));
     } catch {
-      if (projectId) deleteProject(projectId);
+      if (projectId) {
+        deleteProject(projectId);
+        void removeCloudProject(projectId);
+      }
       showToast('Analysis failed. Please try again.', 'error');
       setState(prev => ({ ...prev, isProcessing: false, isDemoAnalysis: false }));
     }
@@ -2313,6 +2324,7 @@ export default function App() {
   // Delete project
   const handleDeleteProject = useCallback((id: string) => {
     if (deleteProject(id)) {
+      void removeCloudProject(id);
       setState(prev => ({
         ...prev,
         projects: getProjects(),
@@ -2327,6 +2339,7 @@ export default function App() {
   const handleDuplicateProject = useCallback((id: string) => {
     const duplicated = duplicateProject(id);
     if (duplicated) {
+      void saveCloudProject(duplicated);
       setState(prev => ({
         ...prev,
         projects: getProjects()
