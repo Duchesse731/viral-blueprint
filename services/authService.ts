@@ -116,7 +116,19 @@ export function hasPendingPasswordReset(): boolean { return false; }
 export function getPendingResetEmail(): string | null { return null; }
 export function clearPendingReset(): void {}
 export async function deleteAccount(): Promise<{ success: boolean; error?: string }> {
-  return { success: false, error: 'Account deletion requires identity verification and is not connected yet.' };
+  const supabase = getSupabaseClient();
+  if (!supabase) return { success: false, error: configurationError() };
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !sessionData.session?.access_token) return { success: false, error: 'Please sign in again before deleting your account.' };
+
+  const { data, error } = await supabase.functions.invoke('viral-blueprint-delete-account', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${sessionData.session.access_token}` },
+  });
+  if (error || data?.success !== true) return { success: false, error: data?.error || error?.message || 'Account deletion failed.' };
+
+  await supabase.auth.signOut();
+  return { success: true };
 }
 
 export async function getAccountRemainingAnalyses(): Promise<number> {
