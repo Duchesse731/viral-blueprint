@@ -6756,16 +6756,16 @@ function PlansScreen({
         </div>
 
         <div className="plan-card pro">
-          <div className="plan-badge">Recommended</div>
+          <div className="plan-badge">Founding offer</div>
           <div className="plan-header">
-            <h3>Pro Plan</h3>
+            <h3>Founding Creator</h3>
             <div className="plan-price">
-              <span className="price">Price coming soon</span>
+              <span className="price">$19</span>
               <span className="period">per month</span>
             </div>
           </div>
           <ul className="plan-features">
-            <li><Check size={16} /> Monthly analysis allowance</li>
+            <li><Check size={16} /> 20 Blueprint credits each month</li>
             <li><Check size={16} /> All scoring categories</li>
             <li><Check size={16} /> Advanced improvement blueprints</li>
             <li><Check size={16} /> Script Studio access</li>
@@ -6776,10 +6776,10 @@ function PlansScreen({
           </ul>
           <button className="btn btn-primary btn-lg full-width">
             <Crown size={18} />
-            Upgrade to Pro
+            Join for $19/month
           </button>
           <p className="checkout-note">
-            Checkout integration coming soon. Price will be finalized by product owner.
+            Cancel anytime. Each complete Blueprint uses one credit. Paid projects are retained for 30 days.
           </p>
         </div>
       </div>
@@ -6787,9 +6787,8 @@ function PlansScreen({
       <div className="plans-disclaimer">
         <AlertTriangle size={18} />
         <p>
-          Payment processing is not yet active. This interface is prepared for the Pro plan 
-          which will be priced once selected by the product owner. The specific price and 
-          feature limits will be set before activation.
+          Founding pricing is locked at $19 per month for 20 Blueprint credits. Checkout remains
+          unavailable until secure payment processing is connected.
         </p>
       </div>
 
