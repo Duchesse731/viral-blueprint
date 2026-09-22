@@ -589,6 +589,35 @@ Save this post for later! 📌
  * when connecting to a real AI provider.
  */
 export async function analyzeContent(input: AnalysisInput): Promise<AnalysisResult> {
+  if (typeof window !== 'undefined') {
+    const response = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'AI analysis failed.');
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const overallScore = Math.max(0, Math.min(100, Math.round(Number(data.overallScore))));
+    return {
+      ...data,
+      overallScore,
+      overallLabel: getScoreLabel(overallScore),
+      categoryScores: data.categoryScores.map((category: CategoryScore) => ({
+        ...category,
+        label: getScoreLabel(category.score),
+      })),
+      createdAt: now,
+      expiresAt,
+    } as AnalysisResult;
+  }
+
+  return analyzeContentDeterministically(input);
+}
+
+export async function analyzeContentDeterministically(input: AnalysisInput): Promise<AnalysisResult> {
   // Simulate processing time for realistic feel
   await new Promise(resolve => setTimeout(resolve, 500));
   
