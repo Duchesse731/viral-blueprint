@@ -7,6 +7,7 @@ import {
   ContentGoal,
   UploadedFile
 } from '@/types';
+import { getSupabaseClient } from '@/services/supabaseClient';
 
 /**
  * Deterministic scoring service for content analysis.
@@ -590,9 +591,13 @@ Save this post for later! 📌
  */
 export async function analyzeContent(input: AnalysisInput): Promise<AnalysisResult> {
   if (typeof window !== 'undefined') {
+    const account = getSupabaseClient();
+    const session = account ? await account.auth.getSession() : null;
+    const token = session?.data.session?.access_token;
+    if (!token) throw new Error('Please sign in before analyzing content.');
     const response = await fetch('/api/analyze', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(input),
     });
     const data = await response.json();

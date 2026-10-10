@@ -15,8 +15,7 @@ import {
   deleteAccount as performDeleteAccount,
   validateRegistrationData,
   validateLoginData,
-  getAccountRemainingAnalyses,
-  consumeAccountAnalysis
+  getAccountRemainingAnalyses
 } from '@/services/authService';
 import { analyzeContent, getScoreLabel, getScoreLabelText } from '@/services/analysisService';
 import { getSupabaseClient } from '@/services/supabaseClient';
@@ -2280,12 +2279,10 @@ export default function App() {
         return;
       }
 
-      const creditConsumed = await consumeAccountAnalysis();
-      if (!creditConsumed) throw new Error('No analysis credit was available.');
-      
       // Save analysis result
       const updatedProject = saveAnalysisResult(project.id, result);
-      if (updatedProject) void saveCloudProject(updatedProject);
+      const cloudSaved = updatedProject ? await saveCloudProject(updatedProject) : false;
+      if (!cloudSaved) showToast('Analysis saved on this device. Cloud sync failed; download your report before leaving.', 'error');
       
       // Update state
       const projects = getProjects();

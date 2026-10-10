@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
 const CATEGORY_NAMES = [
   'Hook Strength', 'Emotional Impact', 'Audience Relevance', 'Clarity',
@@ -9,6 +10,21 @@ const CATEGORY_NAMES = [
 
 export async function POST(request: Request) {
   try {
+    const authorization = request.headers.get('authorization');
+    const token = authorization?.match(/^Bearer\s+(\S+)$/i)?.[1];
+    if (!token) return NextResponse.json({ error: 'Please sign in before analyzing content.' }, { status: 401 });
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+    if (!url || !key) throw new Error('Account service is not configured.');
+    const account = createClient(url, key, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data: user, error: authError } = await account.auth.getUser(token);
+    if (authError || !user.user) return NextResponse.json({ error: 'Please sign in again.' }, { status: 401 });
+    const { data: remaining, error: creditError } = await account.rpc('get_viral_blueprint_remaining_credits');
+    if (creditError) throw new Error('Unable to check analysis credits.');
+    if (typeof remaining !== 'number' || remaining < 1) return NextResponse.json({ error: 'No analyses remaining.' }, { status: 402 });
     const input = await request.json();
     if (!input?.content || typeof input.content !== 'string' || input.content.trim().length < 3) {
       return NextResponse.json({ error: 'Content is required.' }, { status: 400 });
@@ -62,6 +78,9 @@ categoryScores must contain exactly these nine names in this order: ${CATEGORY_N
       needsImprovement: clean(item.needsImprovement),
     }));
     result.hashtags = Array.isArray(result.hashtags) ? result.hashtags.slice(0, 5) : [];
+    const { data: consumed, error: consumeError } = await account.rpc('consume_viral_blueprint_credit');
+    if (consumeError) throw new Error('Unable to apply analysis credit.');
+    if (consumed !== true) return NextResponse.json({ error: 'No analysis credit was available.' }, { status: 402 });
     return NextResponse.json(result, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     console.error('Viral Blueprint analysis failed', error);
